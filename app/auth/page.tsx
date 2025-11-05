@@ -7,7 +7,7 @@ export default function AuthPage() {
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    alert('Auth akan diaktifkan setelah build sudah hijau.');
+    alert('Auth akan diaktifkan setelah build hijau.');
   }
 
   return (
