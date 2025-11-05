@@ -1,30 +1,54 @@
 'use client';
+
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '../../lib/supabaseClient';
 
-export default function AuthPage() {
-  const [email, setEmail] = useState('');
-  const [sent, setSent] = useState(false);
+export default function SellPage() {
+  const router = useRouter();
+  const [title, setTitle] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const login = async (e: React.FormEvent) => {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    alert("Login Supabase belum aktif di tahap ini, nanti kita sambungkan setelah struktur selesai.");
-  };
+    setLoading(true);
+
+    const { data, error } = await supabase
+      .from('listings')
+      .insert({ title })
+      .select('id')
+      .single();
+
+    setLoading(false);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    if (data?.id) router.push(/listings/${data.id});
+  }
 
   return (
     <main style={{ maxWidth: 428 }}>
-      <h1 style={{ fontSize: 28, fontWeight: 600, marginBottom: 8 }}>Masuk</h1>
-      {sent ? <p>Cek email untuk magic link.</p> : (
-        <form onSubmit={login} style={{ display: 'flex', gap: 8 }}>
-          <input 
-            type="email" 
-            required 
-            placeholder="email@contoh.com"
-            style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10, flex: 1 }}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <button style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}>Kirim Link</button>
-        </form>
-      )}
+      <h1 style={{ fontSize: 28, fontWeight: 600, marginBottom: 8 }}>Jual Motor</h1>
+
+      <form onSubmit={onSubmit} style={{ display: 'grid', gap: 8 }}>
+        <input
+          type="text"
+          required
+          placeholder="Judul Listing"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
+        />
+        <button
+          disabled={loading}
+          style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
+        >
+          {loading ? 'Menyimpan…' : 'Simpan'}
+        </button>
+      </form>
     </main>
   );
 }
