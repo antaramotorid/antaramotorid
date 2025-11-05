@@ -1,26 +1,32 @@
 import { supabase } from '../../lib/supabaseClient';
 
 export default async function ListingsPage() {
-  const { data: listings, error } = await supabase
+  const { data, error } = await supabase
     .from('listings')
-    .select('id, title, brand, year, price')
+    .select('id,title,brand,year,price')
     .order('id', { ascending: false })
     .limit(20);
 
+  // TAMPILKAN DI LAYAR SUPAYA JELAS
   if (error) {
     return (
       <main style={{ maxWidth: 800, margin: '40px auto' }}>
-        <h1 style={{ fontWeight: 600, fontSize: 22, marginBottom: 20 }}>Listing Terbaru</h1>
-        <p>Gagal memuat: {error.message}</p>
+        <h1 style={{ fontWeight: 600, fontSize: 22, marginBottom: 12 }}>Listing Terbaru</h1>
+        <p style={{ color: 'crimson' }}>
+          Gagal memuat: {error.message}
+        </p>
       </main>
     );
   }
 
+  const listings = data ?? [];
+
   return (
     <main style={{ maxWidth: 800, margin: '40px auto' }}>
-      <h1 style={{ fontWeight: 600, fontSize: 22, marginBottom: 20 }}>Listing Terbaru</h1>
+      <h1 style={{ fontWeight: 600, fontSize: 22, marginBottom: 12 }}>Listing Terbaru</h1>
+      <p style={{ marginBottom: 12 }}>Total data: {listings.length}</p>
 
-      {!listings || listings.length === 0 ? (
+      {listings.length === 0 ? (
         <p>Belum ada data.</p>
       ) : (
         <ul style={{ display: 'grid', gap: 18, gridTemplateColumns: 'repeat(auto-fill,minmax(220px,1fr))' }}>
