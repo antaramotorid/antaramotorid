@@ -1,6 +1,4 @@
-export default function RootLayout({
-  children,
-}: { children: React.ReactNode }) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="id">
       <body
@@ -8,7 +6,7 @@ export default function RootLayout({
           maxWidth: 960,
           margin: "0 auto",
           padding: 16,
-          fontFamily: "system-ui, Arial, sans-serif",
+          fontFamily: "system-ui, Arial, sans-serif"
         }}
       >
         {children}
