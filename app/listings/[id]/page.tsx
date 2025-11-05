@@ -5,9 +5,7 @@ export default async function ListingDetailPage({
   params,
 }: { params: { id: string } }) {
   const id = Number(params.id);
-  if (Number.isNaN(id)) {
-    return <main><p>ID tidak valid.</p></main>;
-  }
+  if (Number.isNaN(id)) return <main><p>ID tidak valid.</p></main>;
 
   const { data: listing, error } = await supabase
     .from('listings')
