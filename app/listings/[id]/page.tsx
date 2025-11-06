@@ -1,69 +1,99 @@
-// app/listings/[id]/page.tsx
-import { supabase } from '../../../lib/supabaseClient';
+import Link from "next/link";
+import { supabase } from "../../../lib/supabaseClient";
 
-type Props = { params: { id: string } };
+type Listing = {
+  id: number;
+  title: string;
+  brand: string;
+  year: number;
+  price: number;
+  location: string | null;
+  whatsapp: string | null;
+  created_at: string;
+};
 
-export default async function ListingDetailPage({ params }: Props) {
-  const idNum = Number(params.id);
-  if (!Number.isFinite(idNum)) {
+export default async function ListingDetailPage({
+  params,
+}: {
+  params: { id: string };
+}) {
+  // tabel kita pakai bigserial (angka), jadi pastikan param berupa number
+  const id = Number(params.id);
+  if (!Number.isFinite(id)) {
     return (
-      <main style={{ maxWidth: 800, margin: '40px auto' }}>
-        <h1>Terjadi kesalahan</h1>
-        <p>ID harus angka. ID diminta: {params.id}</p>
+      <main style={{ maxWidth: 860, margin: "40px auto" }}>
+        <h1 style={{ fontSize: 26, fontWeight: 700, marginBottom: 16 }}>
+          Terjadi kesalahan
+        </h1>
+        <p>ID tidak valid: <code>{params.id}</code></p>
+        <p style={{ marginTop: 16 }}>
+          <Link href="/listings">← Kembali ke Listings</Link>
+        </p>
       </main>
     );
   }
 
-  const { data: listing, error } = await supabase
-    .from('listings')
-    .select('id, title, brand, year, price, location, description, contact_whatsapp, created_at')
-    .eq('id', idNum)
-    .single();
+  const { data, error } = await supabase
+    .from("listings")
+    .select("*")
+    .eq("id", id)
+    .single<Listing>();
 
-  if (error || !listing) {
+  if (error || !data) {
     return (
-      <main style={{ maxWidth: 800, margin: '40px auto' }}>
-        <h1>Terjadi kesalahan</h1>
-        <p>{error?.message || 'Data tidak ditemukan.'}</p>
+      <main style={{ maxWidth: 860, margin: "40px auto" }}>
+        <h1 style={{ fontSize: 26, fontWeight: 700, marginBottom: 16 }}>
+          Tidak ditemukan
+        </h1>
+        <p>Listing dengan ID {id} tidak ada.</p>
+        <p style={{ marginTop: 16 }}>
+          <Link href="/listings">← Kembali ke Listings</Link>
+        </p>
       </main>
     );
   }
 
-  const wa = (listing.contact_whatsapp || '').replace(/^\+/, '');
-  const waHref = wa ? `https://wa.me/${wa}` : '';
-  const price =
-    typeof listing.price === 'number' ? `Rp ${listing.price.toLocaleString('id-ID')}` : '—';
+  const waHref = data.whatsapp
+    ? `https://wa.me/${data.whatsapp.replace(/[^0-9]/g, "")}`
+    : null;
 
   return (
-    <main style={{ maxWidth: 900, margin: '40px auto' }}>
-      <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 8 }}>{listing.title}</h1>
-      <p style={{ color: '#4b5563', margin: 0 }}>
-        {listing.brand || '—'} {listing.year ? `• ${listing.year}` : ''} • {listing.location || 'Lokasi tidak ada'}
+    <main style={{ maxWidth: 900, margin: "40px auto" }}>
+      <p style={{ marginBottom: 16 }}>
+        <Link href="/listings">← Kembali ke Listings</Link>
       </p>
-      <p style={{ marginTop: 8, fontWeight: 700 }}>{price}</p>
 
-      {listing.description && (
-        <div style={{ marginTop: 14, whiteSpace: 'pre-wrap' }}>{listing.description}</div>
-      )}
+      <h1 style={{ fontSize: 28, fontWeight: 800, marginBottom: 8 }}>
+        {data.title}
+      </h1>
+
+      <p style={{ color: "#6b7280", marginBottom: 16 }}>
+        {data.brand} • {data.year}
+      </p>
+
+      <p style={{ fontSize: 20, fontWeight: 800, marginBottom: 10 }}>
+        Rp {data.price.toLocaleString("id-ID")}
+      </p>
+
+      <p style={{ fontSize: 14, color: "#6b7280", marginBottom: 24 }}>
+        {data.location || "Lokasi tidak ada"}
+      </p>
 
       {waHref && (
-        <p style={{ marginTop: 16 }}>
-          <a
-            href={waHref}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              display: 'inline-block',
-              padding: '10px 14px',
-              borderRadius: 10,
-              border: '1px solid #10b981',
-              textDecoration: 'none',
-              fontWeight: 600,
-            }}
-          >
-            Chat via WhatsApp
-          </a>
-        </p>
+        <a
+          href={waHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: "inline-block",
+            padding: "10px 16px",
+            borderRadius: 8,
+            border: "1px solid #10b981",
+            textDecoration: "none",
+          }}
+        >
+          Hubungi via WhatsApp
+        </a>
       )}
     </main>
   );
