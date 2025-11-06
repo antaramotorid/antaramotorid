@@ -1,15 +1,15 @@
 // app/sell/page.tsx
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabaseClient';
 
 type NewListing = {
   title: string;
   brand: string;
-  year: number | '';
-  price: number | '';
+  year: string;                 // simpan sebagai string di form
+  price: string;                // simpan sebagai string di form
   location: string;
   description: string;
   contact_whatsapp: string;
@@ -17,6 +17,7 @@ type NewListing = {
 
 export default function SellPage() {
   const r = useRouter();
+
   const [form, setForm] = useState<NewListing>({
     title: '',
     brand: '',
@@ -26,113 +27,109 @@ export default function SellPage() {
     description: '',
     contact_whatsapp: '',
   });
+
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const previews = useMemo(() => files.map(f => URL.createObjectURL(f)), [files]);
+  const previews = useMemo(() => files.map((f) => URL.createObjectURL(f)), [files]);
 
   const onChange =
     (k: keyof NewListing) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-      const v = e.target.value;
-      setForm(s => ({
-        ...s,
-        [k]:
-          k === 'year' || k === 'price'
-            ? (v === '' ? '' : Number(v))
-            : v,
-      }));
+      setForm((s) => ({ ...s, [k]: e.target.value }));
     };
 
   const onPickFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const picked = e.target.files ? Array.from(e.target.files) : [];
-    // batasi maksimal 6
-    const imgs = picked.slice(0, 6).filter(f => f.type.startsWith('image/'));
+    const imgs = picked.filter((f) => f.type.startsWith('image/')).slice(0, 6); // max 6
     setFiles(imgs);
   };
 
+  async function uploadOne(listingId: string, file: File, index: number) {
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+    const path = `${listingId}/${Date.now()}-${index}.${ext}`;
+
+    const { error: upErr } = await supabase.storage
+      .from('listing-images')
+      .upload(path, file, {
+        cacheControl: '3600',
+        upsert: false,
+        contentType: file.type,
+      });
+
+    if (upErr) throw upErr;
+
+    const { data: pub } = supabase.storage.from('listing-images').getPublicUrl(path);
+    const publicUrl = pub.publicUrl;
+
+    const { error: imgErr } = await supabase.from('listing_images').insert({
+      listing_id: listingId, // <- UUID friendly
+      url: publicUrl,
+    });
+
+    if (imgErr) throw imgErr;
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.title || !form.brand || form.year === '' || form.price === '') {
+
+    if (!form.title || !form.brand || !form.year || !form.price) {
       alert('Judul, Merek, Tahun, dan Harga wajib diisi.');
       return;
     }
-    if (files.length === 0) {
-      const ok = confirm('Kamu belum memilih foto. Lanjut tanpa foto?');
-      if (!ok) return;
+
+    // konversi aman string -> number | null
+    const yearNum = form.year.trim() === '' ? null : Number(form.year);
+    const priceNum = form.price.trim() === '' ? null : Number(form.price);
+    if (yearNum !== null && Number.isNaN(yearNum)) {
+      alert('Tahun tidak valid. Isi angka, contoh: 2019');
+      return;
+    }
+    if (priceNum !== null && Number.isNaN(priceNum)) {
+      alert('Harga tidak valid. Isi angka, contoh: 10000000');
+      return;
     }
 
-    setLoading(true);
+    // normalisasi WA -> 62xxxxxxxxxx (opsional)
+    let wa = form.contact_whatsapp.replace(/\D/g, '');
+    if (wa.startsWith('0')) wa = '62' + wa.slice(1);
+    if (wa && !wa.startsWith('62')) wa = '62' + wa;
 
+    setLoading(true);
     try {
-      // 1) Simpan listing utamanya
+      // 1) insert listing (UUID atau bigint—kita ambil apa adanya dari DB)
       const { data: listing, error: insErr } = await supabase
         .from('listings')
         .insert({
           title: form.title,
           brand: form.brand,
-          year: form.year === '' ? null : Number(form.year),
-          price: form.price === '' ? null : Number(form.price),
+          year: yearNum,
+          price: priceNum,
           location: form.location || null,
           description: form.description || null,
-          contact_whatsapp: form.contact_whatsapp || null,
+          contact_whatsapp: wa || null,
         })
-        .select('id')
+        .select('id') // ambil id yang baru
         .single();
 
       if (insErr) throw insErr;
-      if (!listing?.id) throw new Error('Gagal mendapatkan ID listing.');
+      const listingId = String(listing?.id); // pakai string agar aman untuk UUID
 
-      const listingId = listing.id as number;
-
-      // 2) Upload hingga 6 gambar (ke bucket: listing-images)
-      for (let i = 0; i < Math.min(files.length, 6); i++) {
-        const file = files[i];
-        const ext = file.name.split('.').pop() || 'jpg';
-        const fileName = `${Date.now()}-${i}.${ext}`;
-        const path = `${listingId}/${fileName}`;
-
-        const { error: upErr } = await supabase
-          .storage
-          .from('listing-images')
-          .upload(path, file, {
-            cacheControl: '3600',
-            upsert: false,
-            contentType: file.type,
-          });
-
-        if (upErr) {
-          console.error('Upload gagal:', upErr);
-          // lanjut ke foto berikutnya, tapi kita log error
-          continue;
-        }
-
-        const { data: pub } = supabase
-          .storage
-          .from('listing-images')
-          .getPublicUrl(path);
-
-        const publicUrl = pub.publicUrl;
-
-        // 3) Simpan URL ke tabel listing_images
-        const { error: imgErr } = await supabase
-          .from('listing_images')
-          .insert({
-            listing_id: listingId, // <-- integer FK ke listings.id
-            url: publicUrl,
-          });
-
-        if (imgErr) {
-          console.error('Simpan URL gagal:', imgErr);
-          // tidak menghentikan proses keseluruhan
+      // 2) upload maksimal 6 foto
+      for (let i = 0; i < files.length && i < 6; i++) {
+        try {
+          await uploadOne(listingId, files[i], i);
+        } catch (e) {
+          console.error('Gagal upload 1 foto:', e);
+          // lanjut foto berikutnya
         }
       }
 
       alert('Listing disimpan! Membuka halaman detail…');
-      r.push(`/listings/${listingId}`);
+      r.push(`/listings/${encodeURIComponent(listingId)}`);
     } catch (err: any) {
       console.error(err);
-      alert(`Gagal menyimpan: ${err?.message || err}`);
+      alert('Gagal menyimpan: ' + (err?.message || JSON.stringify(err)));
     } finally {
       setLoading(false);
     }
@@ -148,7 +145,7 @@ export default function SellPage() {
           <input
             value={form.title}
             onChange={onChange('title')}
-            placeholder="contoh: Vario 150 kondisi istimewa"
+            placeholder="Vario 150 kondisi istimewa"
             required
             style={inputStyle}
           />
@@ -160,7 +157,7 @@ export default function SellPage() {
             <input
               value={form.brand}
               onChange={onChange('brand')}
-              placeholder="honda / yamaha / suzuki"
+              placeholder="Honda / Yamaha / Suzuki"
               required
               style={inputStyle}
             />
@@ -226,18 +223,23 @@ export default function SellPage() {
 
         <div style={{ display: 'grid', gap: 8 }}>
           <span>Foto (maksimal 6 gambar)</span>
-          <input
-            type="file"
-            accept="image/*"
-            multiple
-            onChange={onPickFiles}
-          />
+          <input type="file" accept="image/*" multiple onChange={onPickFiles} />
           {files.length > 0 && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 10 }}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+                gap: 10,
+              }}
+            >
               {previews.map((src, i) => (
                 <div key={i} style={{ border: '1px solid #ddd', borderRadius: 8, padding: 6 }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={src} alt={`preview-${i}`} style={{ width: '100%', height: 100, objectFit: 'cover', borderRadius: 6 }} />
+                  <img
+                    src={src}
+                    alt={`preview-${i}`}
+                    style={{ width: '100%', height: 100, objectFit: 'cover', borderRadius: 6 }}
+                  />
                 </div>
               ))}
             </div>
