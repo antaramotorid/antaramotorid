@@ -1,5 +1,8 @@
 // app/listings/page.tsx
-import { supabase } from '@/lib/supabaseClient';
+export const revalidate = 0;            // jangan cache
+export const dynamic = 'force-dynamic'; // paksa dinamis
+
+import { supabase } from '../../lib/supabaseClient';
 
 type Row = {
   id: string;
@@ -14,21 +17,22 @@ export default async function ListingsPage() {
     .from('listings')
     .select('id, title, brand, year, price')
     .order('created_at', { ascending: false })
-    .limit(50);
+    .limit(24);
+
+  if (error) {
+    return (
+      <main style={{ maxWidth: 800, margin: '40px auto' }}>
+        <h1>Listing Terbaru</h1>
+        <p style={{ color: 'crimson' }}>Gagal memuat: {error.message}</p>
+      </main>
+    );
+  }
 
   const listings: Row[] = data ?? [];
 
   return (
-    <main style={{ maxWidth: 900, margin: '40px auto' }}>
-      <h1 style={{ fontWeight: 700, fontSize: 24, marginBottom: 20 }}>
-        Listing Terbaru
-      </h1>
-
-      {error && (
-        <p style={{ color: 'crimson', marginBottom: 16 }}>
-          Gagal memuat data: {error.message}
-        </p>
-      )}
+    <main style={{ maxWidth: 800, margin: '40px auto' }}>
+      <h1 style={{ fontWeight: 600, fontSize: 22, marginBottom: 20 }}>Listing Terbaru</h1>
 
       {listings.length === 0 ? (
         <p>Belum ada data.</p>
@@ -36,37 +40,32 @@ export default async function ListingsPage() {
         <ul
           style={{
             display: 'grid',
-            gap: 16,
-            gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+            gap: 18,
+            gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+            listStyle: 'none',
+            padding: 0,
           }}
         >
           {listings.map((l) => (
             <li
               key={l.id}
               style={{
-                border: '1px solid #ddd',
-                borderRadius: 10,
+                border: '1px solid #e5e7eb',
+                borderRadius: 12,
                 padding: 14,
-                background: '#fff',
               }}
             >
               <a
                 href={`/listings/${l.id}`}
-                style={{ textDecoration: 'none', color: '#0b66c3' }}
+                style={{ display: 'inline-block', marginBottom: 8, fontWeight: 600, textDecoration: 'none' }}
               >
-                <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>
-                  {l.title ?? '(Tanpa judul)'}
-                </h2>
+                {l.title ?? '(tanpa judul)'}
               </a>
-
-              <p style={{ margin: '8px 0 0 0', color: '#555' }}>
-                {(l.brand ?? '-').toLowerCase()} — {l.year ?? '-'}
-              </p>
-
+              <div style={{ opacity: 0.75, marginBottom: 6 }}>
+                {l.brand ?? '-'} {l.year ? `• ${l.year}` : ''}
+              </div>
               {typeof l.price === 'number' && (
-                <p style={{ margin: '10px 0 0 0', fontWeight: 700 }}>
-                  Rp {l.price.toLocaleString('id-ID')}
-                </p>
+                <div style={{ fontWeight: 700 }}>Rp {l.price.toLocaleString('id-ID')}</div>
               )}
             </li>
           ))}
