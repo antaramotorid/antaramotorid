@@ -2,7 +2,7 @@ import Link from "next/link";
 import { supabase } from "../../../lib/supabaseClient";
 
 type Listing = {
-  id: number;
+  id: number | string;
   title: string;
   brand: string;
   year: number;
@@ -14,18 +14,21 @@ type Listing = {
 
 export default async function ListingDetailPage({
   params,
-}: {
-  params: { id: string };
-}) {
-  // tabel kita pakai bigserial (angka), jadi pastikan param berupa number
-  const id = Number(params.id);
-  if (!Number.isFinite(id)) {
+}: { params: { id: string } }) {
+  const idParam = params.id;
+
+  // deteksi: numeric (bigserial) atau uuid (ada tanda '-')
+  const isNumericId = /^\d+$/.test(idParam);
+  const idForQuery: number | string = isNumericId ? Number(idParam) : idParam;
+
+  // kalau bukan angka dan bukan pola uuid minimal (mengandung huruf/angka & '-'), kasih error lebih rapi
+  if (!isNumericId && !/^[0-9a-fA-F-]{6,}$/.test(idParam)) {
     return (
       <main style={{ maxWidth: 860, margin: "40px auto" }}>
         <h1 style={{ fontSize: 26, fontWeight: 700, marginBottom: 16 }}>
           Terjadi kesalahan
         </h1>
-        <p>ID tidak valid: <code>{params.id}</code></p>
+        <p>ID tidak valid: <code>{idParam}</code></p>
         <p style={{ marginTop: 16 }}>
           <Link href="/listings">← Kembali ke Listings</Link>
         </p>
@@ -36,7 +39,7 @@ export default async function ListingDetailPage({
   const { data, error } = await supabase
     .from("listings")
     .select("*")
-    .eq("id", id)
+    .eq("id", idForQuery)
     .single<Listing>();
 
   if (error || !data) {
@@ -45,7 +48,7 @@ export default async function ListingDetailPage({
         <h1 style={{ fontSize: 26, fontWeight: 700, marginBottom: 16 }}>
           Tidak ditemukan
         </h1>
-        <p>Listing dengan ID {id} tidak ada.</p>
+        <p>Listing dengan ID <code>{idParam}</code> tidak ada.</p>
         <p style={{ marginTop: 16 }}>
           <Link href="/listings">← Kembali ke Listings</Link>
         </p>
@@ -54,7 +57,7 @@ export default async function ListingDetailPage({
   }
 
   const waHref = data.whatsapp
-    ? `https://wa.me/${data.whatsapp.replace(/[^0-9]/g, "")}`
+    ? `https://wa.me/${String(data.whatsapp).replace(/[^0-9]/g, "")}`
     : null;
 
   return (
@@ -72,7 +75,7 @@ export default async function ListingDetailPage({
       </p>
 
       <p style={{ fontSize: 20, fontWeight: 800, marginBottom: 10 }}>
-        Rp {data.price.toLocaleString("id-ID")}
+        Rp {Number(data.price).toLocaleString("id-ID")}
       </p>
 
       <p style={{ fontSize: 14, color: "#6b7280", marginBottom: 24 }}>
