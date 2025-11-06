@@ -1,59 +1,36 @@
 // app/listings/[id]/page.tsx
-export const dynamic = 'force-dynamic';
+'use client'
 
-import { supabase } from '../../../lib/supabaseClient'; // RELATIVE IMPORT
+import { supabase } from '@/lib/supabaseClient';
 
-type PageProps = { params: { id: string } };
+export default async function ListingDetailPage({ params }: { params: { id: string } }) {
 
-export default async function ListingDetailPage({ params }: PageProps) {
-  // Ambil 1 baris by id
   const { data: listing, error } = await supabase
     .from('listings')
     .select('*')
-    .eq('id', params.id)
-    .maybeSingle();
+    .eq('id', params.id)      // uuid string jadi aman
+    .single();
 
-  if (error) {
+  if (error || !listing) {
     return (
-      <main style={{ maxWidth: 800, margin: '40px auto' }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700 }}>Terjadi kesalahan</h1>
-        <pre style={{ whiteSpace: 'pre-wrap' }}>{error.message}</pre>
-        <p>ID diminta: {params.id}</p>
+      <main style={{ maxWidth:900, margin:'40px auto' }}>
+        <h1>Terjadi kesalahan</h1>
+        <p>Tidak ditemukan item dengan ID: {params.id}</p>
       </main>
-    );
-  }
-
-  if (!listing) {
-    return (
-      <main style={{ maxWidth: 800, margin: '40px auto' }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700 }}>Tidak ditemukan</h1>
-        <p>ID diminta: {params.id}</p>
-      </main>
-    );
+    )
   }
 
   return (
-    <main
-      style={{
-        display: 'grid',
-        gap: 20,
-        gridTemplateColumns: '2fr 1fr',
-        maxWidth: 900,
-        margin: '40px auto',
-      }}
-    >
+    <main style={{ maxWidth:900, margin:'40px auto', display:'grid', gap:20, gridTemplateColumns:'2fr 1fr' }}>
       <div>
-        <h1 style={{ fontSize: 28, fontWeight: 700 }}>{listing.title}</h1>
-        <div style={{ marginTop: 10, opacity: 0.85 }}>
-          <div>{listing.brand} — {listing.year}</div>
-          {typeof listing.price === 'number' && (
-            <div style={{ marginTop: 8 }}>Rp {listing.price.toLocaleString('id-ID')}</div>
-          )}
-        </div>
+        <h1 style={{ fontSize:28, fontWeight:700 }}>{listing.title}</h1>
+        <p>{listing.brand} - {listing.year}</p>
+        <p>Rp {listing.price.toLocaleString()}</p>
       </div>
-      <aside>
-        <a href="/listings" style={{ textDecoration: 'none' }}>← Kembali</a>
-      </aside>
+      <div>
+        <h3>Info Penjual</h3>
+        <p>- nanti kita isi kolom WA</p>
+      </div>
     </main>
-  );
+  )
 }
