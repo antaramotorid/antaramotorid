@@ -1,4 +1,3 @@
-// app/listings/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -6,18 +5,20 @@ import Link from 'next/link';
 import { supabase } from '../../lib/supabaseClient';
 
 type Listing = {
-  id: number;
+  id: string;                 // uuid
   title: string;
   brand?: string | null;
   year?: number | null;
   price?: number | null;
   location?: string | null;
-  whatsapp?: string | null;
+  contact_whatsapp?: string | null; // <- pakai nama kolom di DB
+  description?: string | null;
+  image_url?: string | null;        // opsional
   created_at?: string | null;
 };
 
 function toRupiah(n?: number | null) {
-  if (typeof n !== 'number') return '-';
+  if (typeof n !== 'number') return '—';
   return n.toLocaleString('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 });
 }
 
@@ -38,8 +39,6 @@ export default function ListingsPage() {
     (async () => {
       setLoading(true);
       setErrorText(null);
-
-      // AMAN: ambil semua kolom yang ada (meski location/whatsapp belum dibuat)
       const { data, error } = await supabase
         .from('listings')
         .select('*')
@@ -57,8 +56,8 @@ export default function ListingsPage() {
   }, []);
 
   return (
-    <main style={{ maxWidth: 900, margin: '40px auto' }}>
-      <h1 style={{ fontWeight: 700, fontSize: 24, marginBottom: 16 }}>Listing Terbaru</h1>
+    <main style={{ maxWidth: 980, margin: '40px auto' }}>
+      <h1 style={{ fontWeight: 800, fontSize: 24, marginBottom: 16 }}>Listing Terbaru</h1>
 
       {loading && <p>Memuat…</p>}
       {errorText && <p style={{ color: 'crimson' }}>Error: {errorText}</p>}
@@ -74,47 +73,69 @@ export default function ListingsPage() {
         }}
       >
         {items.map((l) => {
-          const wa = waLink(l.whatsapp);
+          const link = `/listings/${encodeURIComponent(l.id)}`;
+          const wa = waLink(l.contact_whatsapp);
+          const price = toRupiah(l.price);
+          const img = l.image_url || 'https://via.placeholder.com/480x320?text=No+Photo';
+
           return (
             <li
               key={l.id}
-              style={{ border: '1px solid #ddd', borderRadius: 10, padding: 14 }}
+              style={{
+                border: '1px solid #e5e7eb',
+                borderRadius: 12,
+                overflow: 'hidden',
+                background: '#fff',
+              }}
             >
-              <Link href={`/listings/${l.id}`} style={{ textDecoration: 'none' }}>
-                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#1e40af' }}>
-                  {l.title}
-                </h3>
+              <Link href={link} style={{ textDecoration: 'none', color: 'inherit' }}>
+                <div style={{ aspectRatio: '3/2', background: '#f3f4f6' }}>
+                  <img
+                    src={img}
+                    alt={l.title}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                  />
+                </div>
+
+                <div style={{ padding: 12 }}>
+                  <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#1e40af' }}>
+                    {l.title}
+                  </h3>
+
+                  <p style={{ margin: '6px 0 0 0', color: '#4b5563' }}>
+                    {(l.brand || '—')} {l.year ? `• ${l.year}` : ''}
+                  </p>
+
+                  <p style={{ margin: '8px 0 0 0', fontWeight: 800 }}>{price}</p>
+
+                  {l.location && (
+                    <p style={{ margin: '6px 0 0 0', color: '#6b7280', fontSize: 12 }}>{l.location}</p>
+                  )}
+
+                  {wa && (
+                    <div style={{ marginTop: 10 }}>
+                      <a
+                        href={wa}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          display: 'inline-block',
+                          padding: '6px 10px',
+                          border: '1px solid #16a34a',
+                          borderRadius: 999,
+                          textDecoration: 'none',
+                          color: '#16a34a',
+                          fontWeight: 600,
+                          fontSize: 12,
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        WhatsApp
+                      </a>
+                    </div>
+                  )}
+                </div>
               </Link>
-
-              <p style={{ margin: '6px 0 0 0', color: '#444' }}>
-                {(l.brand ?? '-') + ' • ' + (l.year ?? '-')}
-              </p>
-
-              <p style={{ margin: '8px 0 0 0', fontWeight: 800 }}>{toRupiah(l.price)}</p>
-
-              {l.location && (
-                <p style={{ margin: '4px 0 0 0', color: '#6b7280' }}>{l.location}</p>
-              )}
-
-              {wa && (
-                <a
-                  href={wa}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    display: 'inline-block',
-                    marginTop: 10,
-                    padding: '8px 12px',
-                    border: '1px solid #16a34a',
-                    borderRadius: 8,
-                    textDecoration: 'none',
-                    color: '#16a34a',
-                    fontWeight: 600,
-                  }}
-                >
-                  WhatsApp
-                </a>
-              )}
             </li>
           );
         })}
