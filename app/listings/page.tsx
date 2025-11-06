@@ -1,9 +1,8 @@
-// app/listings/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase } from "../../lib/supabaseClient"; // <= pakai relative import
 
 type Listing = {
   id: number;
