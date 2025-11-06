@@ -37,39 +37,15 @@ export default async function ListingsPage() {
       {listings.length === 0 ? (
         <p>Belum ada data.</p>
       ) : (
-        <ul
-          style={{
-            display: 'grid',
-            gap: 18,
-            gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-            listStyle: 'none',
-            padding: 0,
-          }}
-        >
-          {listings.map((l) => (
-            <li
-              key={l.id}
-              style={{
-                border: '1px solid #e5e7eb',
-                borderRadius: 12,
-                padding: 14,
-              }}
-            >
-              <a
-                href={`/listings/${l.id}`}
-                style={{ display: 'inline-block', marginBottom: 8, fontWeight: 600, textDecoration: 'none' }}
-              >
-                {l.title ?? '(tanpa judul)'}
-              </a>
-              <div style={{ opacity: 0.75, marginBottom: 6 }}>
-                {l.brand ?? '-'} {l.year ? `• ${l.year}` : ''}
-              </div>
-              {typeof l.price === 'number' && (
-                <div style={{ fontWeight: 700 }}>Rp {l.price.toLocaleString('id-ID')}</div>
-              )}
-            </li>
-          ))}
-        </ul>
+        <ul style={{ display:'grid', gap:18, gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))' }}>
+  { listings.map(x => (
+    <li key={x.id} style={{ border:'1px solid #ddd', padding:12, borderRadius:8 }}>
+      <Link href={/listings/${x.id}}>{x.title}</Link>
+      <p>{x.brand} - {x.year}</p>
+      <b>Rp {x.price}</b>
+    </li>
+  ))}
+</ul>
       )}
     </main>
   );
