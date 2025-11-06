@@ -1,3 +1,4 @@
+// app/sell/page.tsx
 'use client';
 
 import { useState } from 'react';
@@ -11,91 +12,127 @@ export default function SellPage() {
   const [brand, setBrand] = useState('');
   const [year, setYear] = useState<number | ''>('');
   const [price, setPrice] = useState<number | ''>('');
+  const [location, setLocation] = useState('');
+  const [description, setDescription] = useState('');
+  const [wa, setWa] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const onSubmit = async (e: React.FormEvent) => {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!title.trim()) {
-      alert('Judul wajib diisi');
+
+    // validasi sederhana
+    if (!title || !brand || !year || !price) {
+      alert('Judul, merek, tahun, dan harga wajib diisi.');
       return;
     }
 
     setLoading(true);
+
     const { data, error } = await supabase
       .from('listings')
-      .insert([
-        {
-          title: title.trim(),
-          brand: brand.trim() || null,
-          year: year === '' ? null : Number(year),
-          price: price === '' ? null : Number(price),
-        },
-      ])
+      .insert([{
+        title,
+        brand,
+        year: Number(year),
+        price: Number(price),
+        location,
+        description,
+        contact_whatsapp: wa,
+      }])
       .select('id')
       .single();
 
     setLoading(false);
 
     if (error) {
-      alert(error.message);
+      alert(`Gagal menyimpan: ${error.message}`);
       return;
     }
 
-    if (data?.id) {
-      // Redirect ke halaman detail
-      r.push(`/listings/${data.id}`);
-    } else {
-      // Fallback: kembali ke daftar
-      r.push('/listings');
-    }
-  };
+    alert('Listing tersimpan! Membuka halaman listing…');
+    r.push('/listings');
+  }
 
   return (
-    <main style={{ maxWidth: 520, margin: '40px auto' }}>
+    <main style={{ maxWidth: 560, margin: '40px auto' }}>
       <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 16 }}>Jual Motor</h1>
 
       <form onSubmit={onSubmit} style={{ display: 'grid', gap: 12 }}>
         <label>
-          <div style={{ marginBottom: 6 }}>Judul</div>
+          <div>Judul Listing *</div>
           <input
             type="text"
             required
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="contoh: Vario 125 2019"
             style={{ width: '100%', padding: 10, border: '1px solid #ddd', borderRadius: 8 }}
           />
         </label>
 
         <label>
-          <div style={{ marginBottom: 6 }}>Merek</div>
+          <div>Merek *</div>
           <input
             type="text"
+            required
             value={brand}
             onChange={(e) => setBrand(e.target.value)}
-            placeholder="honda / yamaha / suzuki"
             style={{ width: '100%', padding: 10, border: '1px solid #ddd', borderRadius: 8 }}
           />
         </label>
 
         <label>
-          <div style={{ marginBottom: 6 }}>Tahun</div>
+          <div>Tahun *</div>
           <input
             type="number"
+            min={1990}
+            max={2099}
+            required
             value={year}
-            onChange={(e) => setYear(e.target.value === '' ? '' : Number(e.target.value))}
-            placeholder="2019"
+            onChange={(e) => setYear(e.target.value ? Number(e.target.value) : '')}
             style={{ width: '100%', padding: 10, border: '1px solid #ddd', borderRadius: 8 }}
           />
         </label>
 
         <label>
-          <div style={{ marginBottom: 6 }}>Harga (Rp)</div>
+          <div>Harga (Rp) *</div>
           <input
             type="number"
+            min={0}
+            required
             value={price}
-            onChange={(e) => setPrice(e.target.value === '' ? '' : Number(e.target.value))}
-            placeholder="15000000"
+            onChange={(e) => setPrice(e.target.value ? Number(e.target.value) : '')}
+            style={{ width: '100%', padding: 10, border: '1px solid #ddd', borderRadius: 8 }}
+          />
+        </label>
+
+        <label>
+          <div>Lokasi</div>
+          <input
+            type="text"
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            placeholder="Kota/Kabupaten"
+            style={{ width: '100%', padding: 10, border: '1px solid #ddd', borderRadius: 8 }}
+          />
+        </label>
+
+        <label>
+          <div>Deskripsi</div>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={4}
+            style={{ width: '100%', padding: 10, border: '1px solid #ddd', borderRadius: 8 }}
+          />
+        </label>
+
+        <label>
+          <div>WhatsApp (opsional)</div>
+          <input
+            type="text"
+            value={wa}
+            onChange={(e) => setWa(e.target.value)}
+            placeholder="62xxxxxxxxxxx"
             style={{ width: '100%', padding: 10, border: '1px solid #ddd', borderRadius: 8 }}
           />
         </label>
@@ -104,20 +141,16 @@ export default function SellPage() {
           type="submit"
           disabled={loading}
           style={{
-            padding: '12px 14px',
-            border: '1px solid #ddd',
+            padding: '12px 16px',
             borderRadius: 10,
+            border: '1px solid #ddd',
             fontWeight: 600,
-            cursor: loading ? 'not-allowed' : 'pointer',
+            cursor: loading ? 'not-allowed' : 'pointer'
           }}
         >
           {loading ? 'Menyimpan…' : 'Simpan'}
         </button>
       </form>
-
-      <div style={{ marginTop: 16 }}>
-        <a href="/listings">← Kembali ke daftar</a>
-      </div>
     </main>
   );
 }
