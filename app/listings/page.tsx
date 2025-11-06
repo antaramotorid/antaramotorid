@@ -1,116 +1,143 @@
-"use client";
+// app/listings/page.tsx
+'use client';
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import { supabase } from "../../lib/supabaseClient"; // <= pakai relative import
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { supabase } from '../../lib/supabaseClient';
 
 type Listing = {
   id: number;
   title: string;
-  brand: string;
-  year: number;
-  price: number;
+  brand: string | null;
+  year: number | null;
+  price: number | null;
   location: string | null;
   whatsapp: string | null;
 };
 
+function toRupiah(n?: number | null) {
+  if (typeof n !== 'number') return '-';
+  return n.toLocaleString('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+    maximumFractionDigits: 0,
+  });
+}
+
+function waLink(raw?: string | null) {
+  if (!raw) return '';
+  // Hanya angka
+  let digits = raw.replace(/\D/g, '');
+  // 08xxxx -> 62xxxx
+  if (digits.startsWith('0')) digits = '62' + digits.slice(1);
+  // 8xxxx -> 62xxxx (kalau user lupa tulis 0/62)
+  if (!digits.startsWith('62')) digits = '62' + digits;
+  return `https://wa.me/${digits}`;
+}
+
 export default function ListingsPage() {
-  const [listings, setListings] = useState<Listing[]>([]);
+  const [items, setItems] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function load() {
+    (async () => {
+      setLoading(true);
       const { data, error } = await supabase
-        .from("listings")
-        .select("*")
-        .order("id", { ascending: false });
+        .from('listings')
+        .select('id,title,brand,year,price,location,whatsapp')
+        .order('created_at', { ascending: false })
+        .limit(24);
 
-      if (!error && data) setListings(data);
+      if (!error && data) setItems(data as Listing[]);
       setLoading(false);
-    }
-    load();
+    })();
   }, []);
 
-  if (loading) return <main style={{ padding: 40 }}>Memuat…</main>;
-
   return (
-    <main style={{ maxWidth: 900, margin: "40px auto" }}>
+    <main style={{ maxWidth: 900, margin: '40px auto' }}>
       <h1 style={{ fontWeight: 700, fontSize: 24, marginBottom: 16 }}>
         Listing Terbaru
       </h1>
 
-      {listings.length === 0 && <p>Tidak ada data.</p>}
+      {loading && <p>Memuat…</p>}
+      {!loading && items.length === 0 && <p>Belum ada data.</p>}
 
-      <div style={{ display: "grid", gap: 18, gridTemplateColumns: "repeat(auto-fill, minmax(260px,1fr))" }}>
-        {listings.map((l) => {
-          const waHref = l.whatsapp
-            ? `https://wa.me/${l.whatsapp.replace(/[^0-9]/g, "")}`
-            : null;
-
+      <ul
+        style={{
+          display: 'grid',
+          gap: 16,
+          gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+          listStyle: 'none',
+          padding: 0,
+        }}
+      >
+        {items.map((l) => {
+          const link = `/listings/${l.id}`;
+          const wa = waLink(l.whatsapp);
           return (
-            <div
+            <li
               key={l.id}
               style={{
-                border: "1px solid #e5e7eb",
-                borderRadius: 8,
+                border: '1px solid #ddd',
+                borderRadius: 10,
                 padding: 14,
-                background: "#fff",
               }}
             >
-              <Link
-                href={`/listings/${l.id}`}
-                style={{ fontSize: 18, fontWeight: 600, color: "#2563eb" }}
-              >
-                {l.title}
+              <Link href={link} style={{ textDecoration: 'none' }}>
+                <h3
+                  style={{
+                    margin: 0,
+                    fontSize: 18,
+                    fontWeight: 700,
+                    color: '#1e40af',
+                  }}
+                >
+                  {l.title}
+                </h3>
               </Link>
 
-              <p style={{ marginTop: 6, color: "#6b7280" }}>
-                {l.brand} • {l.year}
+              <p style={{ margin: '6px 0 0 0', color: '#444' }}>
+                {l.brand || '-'} • {l.year ?? '-'}
               </p>
 
               <p
                 style={{
-                  fontWeight: 700,
-                  marginTop: 10,
-                  fontSize: 16,
+                  margin: '8px 0 0 0',
+                  fontWeight: 800,
                 }}
               >
-                Rp {l.price.toLocaleString("id-ID")}
+                {toRupiah(l.price)}
               </p>
 
-              <div
-                style={{
-                  marginTop: 12,
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <span style={{ fontSize: 12, color: "#6b7280" }}>
-                  {l.location || "Lokasi tidak ada"}
-                </span>
+              {l.location && (
+                <p style={{ margin: '4px 0 0 0', color: '#6b7280' }}>
+                  {l.location}
+                </p>
+              )}
 
-                {waHref && (
-                  <a
-                    href={waHref}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      fontSize: 12,
-                      padding: "6px 12px",
-                      border: "1px solid #10b981",
-                      borderRadius: 999,
-                      textDecoration: "none",
-                    }}
-                  >
-                    WhatsApp
-                  </a>
-                )}
-              </div>
-            </div>
+              {wa && (
+                <a
+                  href={wa}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: 'inline-block',
+                    marginTop: 10,
+                    padding: '8px 12px',
+                    border: '1px solid #16a34a',
+                    borderRadius: 8,
+                    textDecoration: 'none',
+                    color: '#16a34a',
+                    fontWeight: 600,
+                  }}
+                >
+                  WhatsApp
+                </a>
+              )}
+            </li>
           );
         })}
-      </div>
+      </ul>
     </main>
   );
 }
