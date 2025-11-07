@@ -12,30 +12,19 @@ type Listing = {
   year: number | null;
   price: number | null;
   location: string | null;
-  contact_whatsapp: string | null;
   created_at: string | null;
 };
 
 type ImgRow = {
   listing_id: string;
-  file_path?: string | null; // path relatif di bucket
-  url?: string | null;       // ada yg menyimpan url penuh
+  file_path?: string | null; // path relatif di bucket (contoh: "<listingId>/foto1.jpg")
+  url?: string | null;       // kalau kamu menyimpan full URL di kolom ini
   created_at: string | null;
 };
 
 function toRupiah(n?: number | null) {
   if (typeof n !== 'number') return '—';
   return n.toLocaleString('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 });
-}
-
-function makeSrc(x?: {file_path?: string | null; url?: string | null}) {
-  if (!x) return '';
-  if (x.url && x.url.startsWith('http')) return x.url; // sudah public URL
-  if (x.file_path) {
-    const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    return `${base}/storage/v1/object/public/listing-images/${x.file_path}`;
-  }
-  return '';
 }
 
 export default function ListingsPage() {
@@ -50,7 +39,7 @@ export default function ListingsPage() {
       // 1) ambil listing terbaru
       const { data: listings, error: e1 } = await supabase
         .from('listings')
-        .select('id,title,brand,year,price,location,contact_whatsapp,created_at')
+        .select('id,title,brand,year,price,location,created_at')
         .order('created_at', { ascending: false })
         .limit(24);
 
@@ -64,22 +53,39 @@ export default function ListingsPage() {
       const list = listings as Listing[];
       setItems(list);
 
-      // 2) ambil semua foto utk id yg kita punya, pilih paling awal per listing
+      // 2) ambil foto pertama untuk tiap listing (kalau ada)
       const ids = list.map((l) => l.id);
       if (ids.length) {
         const { data: imgs } = await supabase
           .from('listing_images')
           .select('listing_id,file_path,url,created_at')
           .in('listing_id', ids)
-          .order('created_at', { ascending: true });
+          .order('created_at', { ascending: true }); // foto paling awal jadi cover
 
-        const m: Record<string, string> = {};
-        (imgs as ImgRow[] | null)?.forEach((row) => {
-          if (!m[row.listing_id]) {
-            m[row.listing_id] = makeSrc(row) || '';
+        const mapping: Record<string, string> = {};
+
+        for (const row of (imgs as ImgRow[] | null) || []) {
+          // kalau belum ada cover utk listing ini, set sekarang
+          if (!mapping[row.listing_id]) {
+            // 2.a kalau kolom url sudah berisi full URL, pakai itu
+            if (row.url && row.url.startsWith('http')) {
+              mapping[row.listing_id] = row.url;
+              continue;
+            }
+            // 2.b kalau ada file_path, minta public URL dari Supabase Storage
+            if (row.file_path) {
+              const { data } = supabase
+                .storage
+                .from('listing-images')
+                .getPublicUrl(row.file_path);
+              if (data?.publicUrl) {
+                mapping[row.listing_id] = data.publicUrl;
+              }
+            }
           }
-        });
-        setHero(m);
+        }
+
+        setHero(mapping);
       }
 
       setLoading(false);
@@ -108,7 +114,12 @@ export default function ListingsPage() {
               <Link href={`/listings/${encodeURIComponent(l.id)}`} style={{ textDecoration: 'none', color: 'inherit' }}>
                 <div style={{ aspectRatio: '3/2', background: '#f3f4f6' }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={img} alt={l.title} style={{ width: '100%', height: '100%', objectFit: 'cover', display:'block' }} />
+                  <img
+                    src={img}
+                    alt={l.title}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                    loading="lazy"
+                  />
                 </div>
                 <div style={{ padding: 12 }}>
                   <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#1e40af' }}>{l.title}</h3>
