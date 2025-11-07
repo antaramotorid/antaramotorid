@@ -1,6 +1,7 @@
 // app/listings/[id]/page.tsx
 import Link from "next/link";
 import { supabase } from "../../../lib/supabaseClient";
+import MediaCarousel from "../../components/MediaCarousel";
 
 function normalizeWa(n: any): string | null {
   if (!n) return null;
@@ -12,7 +13,6 @@ function normalizeWa(n: any): string | null {
 }
 
 export default async function ListingDetail({ params }: { params: { id: string } }) {
-  // 1) Ambil data listing
   const { data: listing } = await supabase
     .from("listings")
     .select("*")
@@ -28,12 +28,11 @@ export default async function ListingDetail({ params }: { params: { id: string }
     );
   }
 
-  // 2) Gambar (baca dari bucket foto)
+  // Gambar dari bucket foto
   const imageBuckets = ["Listing_image", "listing-images", "listing_images"];
   const imageUrls: string[] = [];
   for (const bucket of imageBuckets) {
-    const { data: files, error } = await supabase.storage.from(bucket).list(params.id, { limit: 50 });
-    if (error) continue;
+    const { data: files } = await supabase.storage.from(bucket).list(params.id, { limit: 50 });
     if (!files?.length) continue;
     for (const f of files) {
       const { data } = supabase.storage.from(bucket).getPublicUrl(`${params.id}/${f.name}`);
@@ -42,21 +41,19 @@ export default async function ListingDetail({ params }: { params: { id: string }
     if (imageUrls.length) break;
   }
 
-  // 3) Video (HANYA dari bucket publik listing-videos)
-  const videoBuckets = ["listing-videos"]; // fokus 1 bucket publik
+  // Video HANYA dari bucket publik listing-videos
   const videoUrls: string[] = [];
-  for (const bucket of videoBuckets) {
-    const { data: files, error } = await supabase.storage.from(bucket).list(params.id, { limit: 20 });
-    if (error) continue;
-    if (!files?.length) continue;
-    for (const f of files) {
-      const { data } = supabase.storage.from(bucket).getPublicUrl(`${params.id}/${f.name}`);
-      if (data?.publicUrl) videoUrls.push(data.publicUrl);
+  {
+    const bucket = "listing-videos";
+    const { data: files } = await supabase.storage.from(bucket).list(params.id, { limit: 20 });
+    if (files?.length) {
+      for (const f of files) {
+        const { data } = supabase.storage.from(bucket).getPublicUrl(`${params.id}/${f.name}`);
+        if (data?.publicUrl) videoUrls.push(data.publicUrl);
+      }
     }
-    if (videoUrls.length) break;
   }
 
-  // 4) Util & WA
   const rp = (n: any) =>
     typeof n === "number"
       ? new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n)
@@ -65,81 +62,29 @@ export default async function ListingDetail({ params }: { params: { id: string }
   const phoneRaw = (listing as any).whatsapp || (listing as any).contact_whatsapp || null;
   const wa = normalizeWa(phoneRaw);
 
-  // 5) URL Maps embed dari lokasi (kalau ada)
-  const mapEmbed =
-    listing.location
-      ? `https://www.google.com/maps?q=${encodeURIComponent(listing.location)}&output=embed`
-      : null;
+  const mapEmbed = listing.location
+    ? `https://www.google.com/maps?q=${encodeURIComponent(listing.location)}&output=embed`
+    : null;
 
-  const carouselPhotos = imageUrls.slice(0, 6); // batasi 6 foto seperti OLX
+  const carouselPhotos = imageUrls.slice(0, 6); // batasi 6 foto
 
   return (
     <main style={{ maxWidth: 1100, margin: "40px auto", padding: "0 16px" }}>
       <p><Link href="/listings">← Kembali ke Listings</Link></p>
 
-      {/* ====== VIDEO UTAMA (di atas, autoplay mute loop) ====== */}
-      {videoUrls.length > 0 && (
-        <section style={{ marginTop: 12 }}>
-          <h3 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 8px" }}>Video Unit</h3>
-          <video
-            key={videoUrls[0]}
-            src={videoUrls[0]}
-            autoPlay
-            muted
-            loop
-            controls
-            style={{ width: "100%", borderRadius: 12, background: "#000", maxHeight: 560, objectFit: "cover" }}
-          />
-        </section>
-      )}
-
-      {/* ====== FOTO: Carousel swipe (klik = zoom tab baru) ====== */}
-      {carouselPhotos.length > 0 ? (
-        <div
-          style={{
-            overflowX: "auto",
-            display: "flex",
-            gap: 10,
-            scrollSnapType: "x mandatory",
-            WebkitOverflowScrolling: "touch",
-            borderRadius: 12,
-            marginTop: 12,
-          }}
-        >
-          {carouselPhotos.map((url, i) => (
-            <a
-              key={`img-${i}`}
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                flex: "0 0 100%",
-                scrollSnapAlign: "center",
-                display: "block",
-                borderRadius: 12,
-                overflow: "hidden",
-                background: "#f3f4f6",
-              }}
-              title="Klik untuk buka ukuran besar"
-            >
-              <img
-                src={url}
-                alt={`foto-${i + 1}`}
-                style={{ width: "100%", height: 520, objectFit: "cover", display: "block" }}
-              />
-            </a>
-          ))}
-        </div>
+      {/* === MEDIA CAROUSEL: slide 1 video (jika ada), lalu foto-foto === */}
+      {(videoUrls.length > 0 || carouselPhotos.length > 0) ? (
+        <MediaCarousel videoUrls={videoUrls} images={carouselPhotos} />
       ) : (
         <div style={{ width: "100%", aspectRatio: "16/9", background: "#f3f4f6", borderRadius: 12, display: "grid", placeItems: "center", color: "#9ca3af", marginTop: 12 }}>
-          Tidak ada foto
+          Tidak ada media
         </div>
       )}
 
-      {/* ====== Thumbnail Foto ====== */}
+      {/* Foto Unit (grid semua foto, opsional untuk zoom cepat) */}
       {imageUrls.length > 0 && (
         <section style={{ marginTop: 12 }}>
-          <h3 style={{ fontSize: 16, fontWeight: 700, margin: "4px 0 8px" }}>Thumbnail Foto</h3>
+          <h3 style={{ fontSize: 16, fontWeight: 700, margin: "4px 0 8px" }}>Foto Unit</h3>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(120px,1fr))", gap: 10 }}>
             {imageUrls.map((url, i) => (
               <a key={`thumb-${i}`} href={url} target="_blank" rel="noopener noreferrer" title="Klik untuk zoom">
@@ -154,7 +99,7 @@ export default async function ListingDetail({ params }: { params: { id: string }
         </section>
       )}
 
-      {/* ====== Thumbnail Video (jika ada lebih dari 1) ====== */}
+      {/* Jika punya >1 video, tampilkan sebagai thumbnail video terpisah (opsional) */}
       {videoUrls.length > 1 && (
         <section style={{ marginTop: 18 }}>
           <h3 style={{ fontSize: 16, fontWeight: 700, margin: "0 0 8px" }}>Thumbnail Video</h3>
@@ -172,7 +117,7 @@ export default async function ListingDetail({ params }: { params: { id: string }
         </section>
       )}
 
-      {/* ====== Info utama ====== */}
+      {/* Info utama */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 18, flexWrap: "wrap" }}>
         <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0 }}>{listing.title}</h1>
         {wa && (
@@ -199,7 +144,6 @@ export default async function ListingDetail({ params }: { params: { id: string }
         </>
       )}
 
-      {/* ====== Peta lokasi ====== */}
       {mapEmbed && (
         <section style={{ marginTop: 24 }}>
           <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Lokasi Penjual</h3>
