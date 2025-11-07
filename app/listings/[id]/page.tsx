@@ -91,6 +91,13 @@ export default async function ListingDetail({
     (listing as any).whatsapp || (listing as any).contact_whatsapp || null;
   const wa = normalizeWa(phoneRaw);
 
+  // 5) Peta lokasi (embed dari text location bila ada)
+  const mapEmbed = listing.location
+    ? `https://www.google.com/maps?q=${encodeURIComponent(
+        listing.location
+      )}&output=embed`
+    : null;
+
   return (
     <main style={{ maxWidth: 1100, margin: "40px auto", padding: "0 16px" }}>
       <p>
@@ -144,6 +151,29 @@ export default async function ListingDetail({
           </h3>
           <p style={{ whiteSpace: "pre-wrap" }}>{listing.description}</p>
         </>
+      )}
+
+      {/* Lokasi Penjual (peta) */}
+      {mapEmbed && (
+        <section style={{ marginTop: 24 }}>
+          <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
+            Lokasi Penjual
+          </h3>
+          <div
+            style={{
+              borderRadius: 12,
+              overflow: "hidden",
+              border: "1px solid #e5e7eb",
+            }}
+          >
+            <iframe
+              src={mapEmbed}
+              loading="lazy"
+              style={{ width: "100%", height: 360, border: "0" }}
+              referrerPolicy="no-referrer-when-downgrade"
+            />
+          </div>
+        </section>
       )}
     </main>
   );
