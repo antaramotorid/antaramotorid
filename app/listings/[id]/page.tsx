@@ -1,293 +1,267 @@
-// app/listings/[id]/page.tsx
+// app/sell/page.tsx
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
-import { supabase } from '../../../lib/supabaseClient'; // tanpa alias
+import { useState, ChangeEvent, FormEvent } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '../../lib/supabaseClient';
 
-type Listing = {
-  id: string;
+type FormState = {
   title: string;
-  brand: string | null;
-  year: number | null;
-  price: number | null;
-  location: string | null;
-  description: string | null;
-  whatsapp: string | null;
-  contact_whatsapp?: string | null;
+  brand: string;
+  year: string;
+  price: string;
+  location: string;
+  description: string;
+  whatsapp: string;
 };
 
-function formatPrice(n?: number | null) {
-  if (typeof n !== 'number') return '';
-  return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n);
-}
-function normalizeWa(n: any): string | null {
-  if (!n) return null;
-  const d = String(n).replace(/\D/g, '');
-  if (!d) return null;
-  if (d.startsWith('0')) return '62' + d.slice(1);
-  return d;
-}
+export default function SellPage() {
+  const router = useRouter();
 
-export default function ListingDetailPage({ params }: { params: { id: string } }) {
-  const { id } = params;
+  const [form, setForm] = useState<FormState>({
+    title: '',
+    brand: '',
+    year: '',
+    price: '',
+    location: '',
+    description: '',
+    whatsapp: '',
+  });
 
-  const [listing, setListing] = useState<Listing | null>(null);
-  const [images, setImages] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [files, setFiles] = useState<File[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [progress, setProgress] = useState<string>('');
 
-  // Carousel state
-  const [index, setIndex] = useState(0);
-  const trackRef = useRef<HTMLDivElement | null>(null);
-  const startX = useRef<number | null>(null);
-  const currentTranslate = useRef(0);
+  function onChange(
+    e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
+  ) {
+    const { name, value } = e.target;
+    setForm((s) => ({ ...s, [name]: value }));
+  }
 
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      setLoading(true);
+  function onPickFiles(e: ChangeEvent<HTMLInputElement>) {
+    const f = Array.from(e.target.files || []);
+    // batasi maksimal 6 file
+    const selected = f.slice(0, 6);
+    setFiles(selected);
+  }
 
-      // 1) Ambil listing
-      const { data: listingData, error: listingErr } = await supabase
-        .from('listings')
-        .select('id, title, brand, year, price, location, description, whatsapp, contact_whatsapp')
-        .eq('id', id)
-        .maybeSingle();
-
-      if (listingErr || !listingData) {
-        setListing(null);
-        setImages([]);
-        setLoading(false);
-        return;
-      }
-
-      // 2) Ambil daftar file dari TABEL listing_images (BUKAN storage.list)
-      const { data: rows, error: imgErr } = await supabase
-        .from('listing_images')
-        .select('file_path, sort_order')
-        .eq('listing_id', id)
-        .order('sort_order', { ascending: true, nullsFirst: true })
-        .order('file_path', { ascending: true });
-
-      if (imgErr) {
-        console.error('listing_images error:', imgErr);
-      }
-
-      // 3) Bangun public URL dari bucket yang benar: "Listing_image"
-      const urls: string[] = (rows || [])
-        .map((r) => {
-          const path = (r as any).file_path as string | null;
-          if (!path) return null;
-          const { data } = supabase.storage.from('Listing_image').getPublicUrl(path);
-          return data?.publicUrl || null;
-        })
-        .filter((u): u is string => !!u);
-
-      if (mounted) {
-        const wa = (listingData as any).whatsapp || (listingData as any).contact_whatsapp || null;
-        setListing({ ...(listingData as Listing), whatsapp: wa });
-        setImages(urls);
-        setIndex(0);
-        setLoading(false);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [id]);
-
-  // Swipe helpers
-  const maxIndex = useMemo(() => Math.max(0, images.length - 1), [images.length]);
-
-  const goTo = (i: number) => {
-    const clamped = Math.min(Math.max(i, 0), maxIndex);
-    setIndex(clamped);
-    if (trackRef.current) {
-      trackRef.current.style.transition = 'transform 240ms ease';
-      trackRef.current.style.transform = `translateX(-${clamped * 100}%)`;
-      currentTranslate.current = -clamped * 100;
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!form.title || !form.brand || !form.year || !form.price) {
+      alert('Judul, Merek, Tahun, dan Harga wajib diisi.');
+      return;
     }
-  };
+    if (files.length === 0) {
+      if (!confirm('Belum pilih foto. Lanjut tanpa foto?')) return;
+    }
+    setSubmitting(true);
+    setProgress('Menyimpan listing...');
 
-  const onTouchStart = (e: React.TouchEvent) => {
-    startX.current = e.touches[0].clientX;
-    if (trackRef.current) trackRef.current.style.transition = 'none';
-  };
-  const onTouchMove = (e: React.TouchEvent) => {
-    if (startX.current == null || !trackRef.current) return;
-    const delta = e.touches[0].clientX - startX.current;
-    const percent = (delta / (trackRef.current.clientWidth || 1)) * 100;
-    trackRef.current.style.transform = `translateX(${currentTranslate.current + percent}%)`;
-  };
-  const onTouchEnd = (e: React.TouchEvent) => {
-    if (startX.current == null || !trackRef.current) return;
-    const delta = e.changedTouches[0].clientX - startX.current;
-    const threshold = (trackRef.current.clientWidth || 1) * 0.15;
-    if (delta < -threshold) goTo(index + 1);
-    else if (delta > threshold) goTo(index - 1);
-    else goTo(index);
-    startX.current = null;
-  };
+    // 1) Insert ke tabel listings
+    const { data: inserted, error: insertErr } = await supabase
+      .from('listings')
+      .insert([
+        {
+          title: form.title.trim(),
+          brand: form.brand.trim(),
+          year: form.year ? Number(form.year) : null,
+          price: form.price ? Number(form.price) : null,
+          location: form.location.trim() || null,
+          description: form.description.trim() || null,
+          whatsapp: form.whatsapp.trim() || null,
+        },
+      ])
+      .select('id')
+      .single();
 
-  // Render
-  if (loading) return <main style={{ maxWidth: 980, margin: '40px auto' }}><p>Memuat…</p></main>;
-  if (!listing) return <main style={{ maxWidth: 980, margin: '40px auto' }}><p>Tidak ditemukan.</p></main>;
+    if (insertErr || !inserted?.id) {
+      alert(insertErr?.message || 'Gagal menyimpan listing');
+      setSubmitting(false);
+      return;
+    }
 
-  const waHref = normalizeWa(listing.whatsapp)
-    ? `https://wa.me/${normalizeWa(listing.whatsapp)}?text=${encodeURIComponent(`Halo, saya tertarik dengan unit "${listing.title}".`)}`
-    : null;
+    const listingId = inserted.id as string;
+
+    // 2) Upload semua file (jika ada)
+    if (files.length > 0) {
+      let idx = 0;
+      for (const file of files) {
+        idx++;
+        setProgress(`Mengunggah foto ${idx}/${files.length}...`);
+
+        // nama file aman: timestamp-index-originalName tanpa spasi
+        const safeName = `${Date.now()}-${idx}-${file.name}`
+          .replace(/\s+/g, '-')
+          .toLowerCase();
+
+        // path di bucket: {listingId}/{safeName}
+        const path = `${listingId}/${safeName}`;
+
+        const { error: upErr } = await supabase
+          .storage
+          .from('listing-images')
+          .upload(path, file, { upsert: false });
+
+        if (upErr) {
+          alert(`Upload gagal untuk ${file.name}: ${upErr.message}`);
+          // lanjut ke file berikutnya; tidak batalkan seluruh proses
+          continue;
+        }
+
+        // 3) Catat ke tabel listing_images
+        const { error: imgErr } = await supabase
+          .from('listing_images')
+          .insert([{ listing_id: listingId, file_path: path }]);
+
+        if (imgErr) {
+          alert(`Gagal mencatat gambar ${file.name}: ${imgErr.message}`);
+          // lanjut ke file berikutnya
+        }
+      }
+    }
+
+    setProgress('Selesai. Mengarahkan ke halaman detail...');
+    router.push(`/listings/${listingId}`);
+  }
 
   return (
-    <main style={{ maxWidth: 980, margin: '28px auto', padding: '0 12px' }}>
-      <Link href="/listings" style={{ display: 'inline-block', marginBottom: 16, color: '#334155' }}>
-        ← Kembali ke Listings
-      </Link>
+    <main style={{ maxWidth: 820, margin: '32px auto', padding: '0 16px' }}>
+      <h1 style={{ fontWeight: 800, fontSize: 28, marginBottom: 16 }}>Jual Motor</h1>
 
-      {/* GALLERY - swipe horizontal seperti OLX */}
-      <section style={{ marginBottom: 20 }}>
-        <div
-          style={{
-            borderRadius: 14,
-            overflow: 'hidden',
-            background: '#f1f5f9',
-            width: '100%',
-            aspectRatio: '16/9',
-            position: 'relative',
-          }}
-        >
-          <div
-            ref={trackRef}
-            onTouchStart={onTouchStart}
-            onTouchMove={onTouchMove}
-            onTouchEnd={onTouchEnd}
-            style={{
-              display: 'flex',
-              width: `${(images.length || 1) * 100}%`,
-              height: '100%',
-              transform: `translateX(-${index * 100}%)`,
-              transition: 'transform 240ms ease',
-            }}
-          >
-            {(images.length ? images : ['/no-image.png']).map((src, i) => (
-              <div key={i} style={{ flex: '0 0 100%', height: '100%' }}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={src}
-                  alt={listing.title}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                />
-              </div>
-            ))}
-          </div>
+      <form onSubmit={onSubmit} style={{ display: 'grid', gap: 14 }}>
+        <label style={{ display: 'grid', gap: 6 }}>
+          <span>Judul Listing *</span>
+          <input
+            name="title"
+            value={form.title}
+            onChange={onChange}
+            required
+            placeholder="Contoh: Yamaha Fazzio"
+            style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
+          />
+        </label>
 
-          {/* Dots */}
-          {images.length > 1 && (
-            <div
-              style={{
-                position: 'absolute',
-                left: 0,
-                right: 0,
-                bottom: 8,
-                display: 'flex',
-                justifyContent: 'center',
-                gap: 6,
-              }}
-            >
-              {images.map((_, i) => (
-                <button
-                  key={i}
-                  onClick={() => goTo(i)}
-                  aria-label={`goto ${i + 1}`}
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: 999,
-                    border: 'none',
-                    background: i === index ? '#0ea5e9' : '#cbd5e1',
-                  }}
-                />
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr', alignItems: 'start' }}>
+          <label style={{ display: 'grid', gap: 6 }}>
+            <span>Merek *</span>
+            <input
+              name="brand"
+              value={form.brand}
+              onChange={onChange}
+              required
+              placeholder="honda / yamaha / suzuki"
+              style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
+            />
+          </label>
+          <label style={{ display: 'grid', gap: 6 }}>
+            <span>Tahun *</span>
+            <input
+              name="year"
+              value={form.year}
+              onChange={onChange}
+              required
+              inputMode="numeric"
+              placeholder="2020"
+              style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
+            />
+          </label>
+        </div>
+
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr', alignItems: 'start' }}>
+          <label style={{ display: 'grid', gap: 6 }}>
+            <span>Harga (Rp) *</span>
+            <input
+              name="price"
+              value={form.price}
+              onChange={onChange}
+              required
+              inputMode="numeric"
+              placeholder="19999999"
+              style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
+            />
+          </label>
+          <label style={{ display: 'grid', gap: 6 }}>
+            <span>Lokasi</span>
+            <input
+              name="location"
+              value={form.location}
+              onChange={onChange}
+              placeholder="Kota/Kabupaten"
+              style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
+            />
+          </label>
+        </div>
+
+        <label style={{ display: 'grid', gap: 6 }}>
+          <span>Deskripsi</span>
+          <textarea
+            name="description"
+            value={form.description}
+            onChange={onChange}
+            rows={4}
+            placeholder="Kondisi, pajak, KM, dll"
+            style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
+          />
+        </label>
+
+        <label style={{ display: 'grid', gap: 6 }}>
+          <span>WhatsApp (opsional)</span>
+          <input
+            name="whatsapp"
+            value={form.whatsapp}
+            onChange={onChange}
+            placeholder="62xxxxxxxxxxx"
+            style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
+          />
+        </label>
+
+        <label style={{ display: 'grid', gap: 6 }}>
+          <span>Foto Unit (maks 6) — bisa pilih banyak sekaligus</span>
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={onPickFiles}
+          />
+          {files.length > 0 && (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill,minmax(96px,1fr))',
+              gap: 8,
+              marginTop: 8
+            }}>
+              {files.map((f, i) => (
+                <div key={i} style={{ border: '1px solid #eee', borderRadius: 8, padding: 6 }}>
+                  <div style={{ fontSize: 12, marginBottom: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {f.name}
+                  </div>
+                  <img
+                    src={URL.createObjectURL(f)}
+                    alt={f.name}
+                    style={{ width: '100%', height: 80, objectFit: 'cover', borderRadius: 6 }}
+                  />
+                </div>
               ))}
             </div>
           )}
-        </div>
+        </label>
 
-        {/* Thumbnails bar */}
-        {images.length > 1 && (
-          <div
-            style={{
-              marginTop: 10,
-              display: 'grid',
-              gridAutoFlow: 'column',
-              gap: 8,
-              overflowX: 'auto',
-              paddingBottom: 4,
-            }}
-          >
-            {images.map((src, i) => (
-              <button
-                key={i}
-                onClick={() => goTo(i)}
-                style={{
-                  border: i === index ? '2px solid #0ea5e9' : '2px solid transparent',
-                  borderRadius: 10,
-                  padding: 0,
-                  width: 82,
-                  height: 62,
-                  overflow: 'hidden',
-                  background: '#f8fafc',
-                  cursor: 'pointer',
-                }}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={src}
-                  alt={`thumb-${i + 1}`}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                />
-              </button>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* INFO */}
-      <section style={{ display: 'grid', gap: 10 }}>
-        <h1 style={{ fontSize: 32, fontWeight: 800, margin: 0 }}>{listing.title}</h1>
-        <p style={{ margin: 0, color: '#64748b' }}>
-          {listing.brand || '-'} • {listing.year ?? '-'}{listing.location ? ` • ${listing.location}` : ''}
-        </p>
-        {typeof listing.price === 'number' && (
-          <p style={{ margin: '6px 0 0', fontSize: 22, fontWeight: 800 }}>{formatPrice(listing.price)}</p>
-        )}
-
-        {waHref && (
-          <div style={{ marginTop: 6 }}>
-            <a
-              href={waHref}
-              target="_blank"
-              rel="noreferrer"
-              style={{
-                display: 'inline-block',
-                padding: '8px 14px',
-                border: '1px solid #22c55e',
-                color: '#16a34a',
-                borderRadius: 999,
-                textDecoration: 'none',
-                fontWeight: 600,
-              }}
-            >
-              Chat via WhatsApp
-            </a>
-          </div>
-        )}
-
-        {listing.description && (
-          <>
-            <h3 style={{ marginTop: 18, marginBottom: 8 }}>Deskripsi</h3>
-            <p style={{ whiteSpace: 'pre-line', marginTop: 0 }}>{listing.description}</p>
-          </>
-        )}
-      </section>
+        <button
+          type="submit"
+          disabled={submitting}
+          style={{
+            background: '#2563eb',
+            color: '#fff',
+            border: 0,
+            borderRadius: 10,
+            padding: '12px 14px',
+            fontWeight: 700
+          }}
+        >
+          {submitting ? (progress || 'Menyimpan...') : 'Simpan'}
+        </button>
+      </form>
     </main>
   );
 }
