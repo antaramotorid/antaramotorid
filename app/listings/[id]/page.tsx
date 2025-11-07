@@ -1,7 +1,13 @@
 import { supabase } from '../../../lib/supabaseClient';
 import Link from 'next/link';
 
+function toBucketPath(filePath: string) {
+  // Jika tersimpan "listing_images/xxx/yyy.jpg" → buang prefix bucket
+  return filePath.replace(/^listing_images\//, '').replace(/^listing-images\//, '');
+}
+
 export default async function ListingDetail({ params }: { params: { id: string } }) {
+  // ambil data listing
   const { data: listing, error } = await supabase
     .from('listings')
     .select('*')
@@ -23,11 +29,16 @@ export default async function ListingDetail({ params }: { params: { id: string }
   // ambil foto utama
   const { data: images } = await supabase
     .from('listing_images')
-    .select('*')
+    .select('file_path, sort_order')
     .eq('listing_id', params.id)
     .order('sort_order', { ascending: true });
 
-  const mainImage = images && images.length > 0 ? images[0].file_path : null;
+  let imageUrl: string | null = null;
+  if (images && images.length > 0 && images[0].file_path) {
+    const pathInBucket = toBucketPath(images[0].file_path);
+    const { data: pub } = supabase.storage.from('listing_images').getPublicUrl(pathInBucket);
+    imageUrl = pub?.publicUrl ?? null;
+  }
 
   return (
     <div className="max-w-3xl mx-auto py-10">
@@ -35,17 +46,19 @@ export default async function ListingDetail({ params }: { params: { id: string }
         ← Kembali ke Listings
       </Link>
 
-      {mainImage && (
+      {imageUrl && (
         <img
-          src={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${mainImage}`}
+          src={imageUrl}
           alt={listing.title}
           className="w-full h-auto rounded-lg mt-6"
         />
       )}
 
       <h1 className="text-3xl font-bold mt-6">{listing.title}</h1>
-      <p className="text-gray-700 mt-2">{listing.brand} • {listing.year} • {listing.location}</p>
-      <p className="font-bold text-2xl mt-4">Rp {listing.price.toLocaleString('id-ID')}</p>
+      <p className="text-gray-700 mt-2">
+        {listing.brand} • {listing.year} • {listing.location}
+      </p>
+      <p className="font-bold text-2xl mt-4">Rp {Number(listing.price).toLocaleString('id-ID')}</p>
       <p className="mt-6">{listing.description}</p>
 
       {listing.whatsapp && (
