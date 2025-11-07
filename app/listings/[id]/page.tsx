@@ -1,115 +1,302 @@
 // app/listings/[id]/page.tsx
-import Link from "next/link";
-import { supabase } from "../../../lib/supabaseClient";
+'use client';
 
-function normalizeWa(n: any): string | null {
-  if (!n) return null;
-  const digits = String(n).replace(/[^0-9]/g, "");
-  if (!digits) return null;
-  if (digits.startsWith("0")) return "62" + digits.slice(1);
-  if (digits.startsWith("62")) return digits;
-  return digits;
+import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
+import { supabase } from '@/lib/supabaseClient';
+
+type Listing = {
+  id: string;
+  title: string;
+  brand: string | null;
+  year: number | null;
+  price: number | null;
+  location: string | null;
+  description: string | null;
+  whatsapp: string | null;
+};
+
+type ListingImage = {
+  id: string;
+  listing_id: string;
+  file_path: string; // contoh: "07c9ad8f-.../foto-1.jpg"
+  sort_order: number | null;
+};
+
+function formatPrice(n?: number | null) {
+  if (typeof n !== 'number') return '';
+  return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n);
 }
 
-export default async function ListingDetail({ params }: { params: { id: string } }) {
-  // 1) Ambil data listing
-  const { data: listing } = await supabase
-    .from("listings")
-    .select("*")
-    .eq("id", params.id)
-    .single();
+export default function ListingDetailPage({
+  params,
+}: {
+  params: { id: string };
+}) {
+  const { id } = params;
 
-  if (!listing) {
-    return (
-      <main style={{ maxWidth: 960, margin: "40px auto" }}>
-        <h1>Listing tidak ditemukan</h1>
-        <p><Link href="/listings">← Kembali</Link></p>
-      </main>
-    );
-  }
+  const [listing, setListing] = useState<Listing | null>(null);
+  const [images, setImages] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // 2) Kumpulkan semua gambar dari bucket mana pun yang tersedia
-  const candidateBuckets = ["Listing_image", "listing-images", "listing_images"];
-  const imageUrls: string[] = [];
+  // Carousel state
+  const [index, setIndex] = useState(0);
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const startX = useRef<number | null>(null);
+  const currentTranslate = useRef(0);
 
-  for (const bucket of candidateBuckets) {
-    const { data: files, error } = await supabase.storage.from(bucket).list(params.id, { limit: 50 });
-    if (error) continue;
-    if (!files?.length) continue;
+  // Fetch listing + images
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      setLoading(true);
 
-    for (const f of files) {
-      const { data } = supabase.storage.from(bucket).getPublicUrl(`${params.id}/${f.name}`);
-      if (data?.publicUrl) imageUrls.push(data.publicUrl);
+      // ambil listing
+      const { data: listingData, error: listingErr } = await supabase
+        .from('listings')
+        .select('id, title, brand, year, price, location, description, whatsapp')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (listingErr) {
+        console.error(listingErr);
+        setLoading(false);
+        return;
+      }
+      if (!listingData) {
+        setLoading(false);
+        return;
+      }
+
+      // ambil images
+      const { data: imgs, error: imgErr } = await supabase
+        .from('listing_images')
+        .select('file_path, sort_order')
+        .eq('listing_id', id)
+        .order('sort_order', { ascending: true })
+        .order('file_path', { ascending: true });
+
+      if (imgErr) {
+        console.error(imgErr);
+      }
+
+      // buat public URL dari setiap file_path
+      const urls: string[] =
+        (imgs || []).map((it: any) => {
+          const { data } = supabase.storage.from('listing-images').getPublicUrl(it.file_path);
+          return data.publicUrl;
+        }) ?? [];
+
+      if (mounted) {
+        setListing(listingData as Listing);
+        setImages(urls);
+        setIndex(0);
+        setLoading(false);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [id]);
+
+  // Swipe helpers
+  const maxIndex = useMemo(() => Math.max(0, images.length - 1), [images.length]);
+
+  const goTo = (i: number) => {
+    const clamped = Math.min(Math.max(i, 0), maxIndex);
+    setIndex(clamped);
+    if (trackRef.current) {
+      trackRef.current.style.transition = 'transform 240ms ease';
+      trackRef.current.style.transform = `translateX(-${clamped * 100}%)`;
+      currentTranslate.current = -clamped * 100;
     }
-    if (imageUrls.length) break; // stop di bucket pertama yang punya isi
-  }
+  };
 
-  // 3) Util format & WA
-  const rp = (n: any) =>
-    typeof n === "number"
-      ? new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n)
-      : "—";
+  const onTouchStart = (e: React.TouchEvent) => {
+    startX.current = e.touches[0].clientX;
+    if (trackRef.current) trackRef.current.style.transition = 'none';
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (startX.current == null || !trackRef.current) return;
+    const delta = e.touches[0].clientX - startX.current;
+    const percent = (delta / (trackRef.current.clientWidth || 1)) * 100;
+    trackRef.current.style.transform = `translateX(${currentTranslate.current + percent}%)`;
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (startX.current == null || !trackRef.current) return;
+    const delta = e.changedTouches[0].clientX - startX.current;
+    const threshold = (trackRef.current.clientWidth || 1) * 0.15; // 15% swipe
+    if (delta < -threshold) goTo(index + 1);
+    else if (delta > threshold) goTo(index - 1);
+    else goTo(index); // snap back
+    startX.current = null;
+  };
 
-  const phoneRaw = (listing as any).whatsapp || (listing as any).contact_whatsapp || null;
-  const wa = normalizeWa(phoneRaw);
+  // Render
+  if (loading) return <main style={{ maxWidth: 980, margin: '40px auto' }}><p>Memuat…</p></main>;
+  if (!listing) return <main style={{ maxWidth: 980, margin: '40px auto' }}><p>Tidak ditemukan.</p></main>;
+
+  const waHref =
+    listing.whatsapp?.trim()
+      ? `https://wa.me/${listing.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(
+          `Halo, saya tertarik dengan unit "${listing.title}".`
+        )}`
+      : null;
 
   return (
-    <main style={{ maxWidth: 1100, margin: "40px auto", padding: "0 16px" }}>
-      <p><Link href="/listings">← Kembali ke Listings</Link></p>
+    <main style={{ maxWidth: 980, margin: '28px auto', padding: '0 12px' }}>
+      <Link href="/listings" style={{ display: 'inline-block', marginBottom: 16, color: '#334155' }}>
+        ← Kembali ke Listings
+      </Link>
 
-      {/* Foto besar */}
-      {imageUrls.length ? (
-        <img
-          src={imageUrls[0]}
-          alt={listing.title || "foto unit"}
-          style={{ width: "100%", borderRadius: 12, marginTop: 12, objectFit: "cover", maxHeight: 520 }}
-        />
-      ) : (
-        <div style={{ width: "100%", aspectRatio: "16/9", background: "#f3f4f6", borderRadius: 12, display: "grid", placeItems: "center", color: "#9ca3af", marginTop: 12 }}>
-          Tidak ada foto
-        </div>
-      )}
-
-      {/* Thumbnails */}
-      {imageUrls.length > 1 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(120px,1fr))", gap: 10, marginTop: 10 }}>
-          {imageUrls.slice(1).map((url, i) => (
-            <img
-              key={i}
-              src={url}
-              alt={`thumb-${i + 2}`}
-              style={{ width: "100%", height: 100, objectFit: "cover", borderRadius: 8 }}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Info */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 18, flexWrap: "wrap" }}>
-        <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0 }}>{listing.title}</h1>
-        {wa && (
-          <a
-            href={`https://wa.me/${wa}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ padding: "10px 14px", border: "1px solid #10b981", borderRadius: 10 }}
+      {/* GALLERY - swipe horizontal seperti OLX */}
+      <section style={{ marginBottom: 20 }}>
+        <div
+          style={{
+            borderRadius: 14,
+            overflow: 'hidden',
+            background: '#f1f5f9',
+            width: '100%',
+            aspectRatio: '16/9',
+            position: 'relative',
+          }}
+        >
+          <div
+            ref={trackRef}
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={onTouchEnd}
+            style={{
+              display: 'flex',
+              width: `${(images.length || 1) * 100}%`,
+              height: '100%',
+              transform: `translateX(-${index * 100}%)`,
+              transition: 'transform 240ms ease',
+            }}
           >
-            Chat via WhatsApp
-          </a>
+            {(images.length ? images : ['/no-image.png']).map((src, i) => (
+              <div key={i} style={{ flex: '0 0 100%', height: '100%' }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={src}
+                  alt={listing.title}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                />
+              </div>
+            ))}
+          </div>
+
+          {/* Dots */}
+          {images.length > 1 && (
+            <div
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                bottom: 8,
+                display: 'flex',
+                justifyContent: 'center',
+                gap: 6,
+              }}
+            >
+              {images.map((_, i) => (
+                <button
+                  key={i}
+                  onClick={() => goTo(i)}
+                  aria-label={`goto ${i + 1}`}
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: 999,
+                    border: 'none',
+                    background: i === index ? '#0ea5e9' : '#cbd5e1',
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Thumbnails bar */}
+        {images.length > 1 && (
+          <div
+            style={{
+              marginTop: 10,
+              display: 'grid',
+              gridAutoFlow: 'column',
+              gap: 8,
+              overflowX: 'auto',
+              paddingBottom: 4,
+            }}
+          >
+            {images.map((src, i) => (
+              <button
+                key={i}
+                onClick={() => goTo(i)}
+                style={{
+                  border: i === index ? '2px solid #0ea5e9' : '2px solid transparent',
+                  borderRadius: 10,
+                  padding: 0,
+                  width: 82,
+                  height: 62,
+                  overflow: 'hidden',
+                  background: '#f8fafc',
+                  cursor: 'pointer',
+                }}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={src}
+                  alt={`thumb-${i + 1}`}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                />
+              </button>
+            ))}
+          </div>
         )}
-      </div>
+      </section>
 
-      <p style={{ color: "#6b7280", marginTop: 6 }}>
-        {listing.brand || "—"} • {listing.year ?? "—"} {listing.location ? `• ${listing.location}` : ""}
-      </p>
-      <p style={{ fontSize: 22, fontWeight: 800, marginTop: 10 }}>{rp(listing.price)}</p>
+      {/* INFO */}
+      <section style={{ display: 'grid', gap: 10 }}>
+        <h1 style={{ fontSize: 32, fontWeight: 800, margin: 0 }}>{listing.title}</h1>
+        <p style={{ margin: 0, color: '#64748b' }}>
+          {listing.brand || '-'} • {listing.year ?? '-'}{listing.location ? ` • ${listing.location}` : ''}
+        </p>
+        {typeof listing.price === 'number' && (
+          <p style={{ margin: '6px 0 0', fontSize: 22, fontWeight: 800 }}>{formatPrice(listing.price)}</p>
+        )}
 
-      {listing.description && (
-        <>
-          <h3 style={{ fontSize: 18, fontWeight: 700, marginTop: 18 }}>Deskripsi</h3>
-          <p style={{ whiteSpace: "pre-wrap" }}>{listing.description}</p>
-        </>
-      )}
+        {/* WhatsApp */}
+        {waHref && (
+          <div style={{ marginTop: 6 }}>
+            <a
+              href={waHref}
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                display: 'inline-block',
+                padding: '8px 14px',
+                border: '1px solid #22c55e',
+                color: '#16a34a',
+                borderRadius: 999,
+                textDecoration: 'none',
+                fontWeight: 600,
+              }}
+            >
+              Chat via WhatsApp
+            </a>
+          </div>
+        )}
+
+        {/* Deskripsi */}
+        {listing.description && (
+          <>
+            <h3 style={{ marginTop: 18, marginBottom: 8 }}>Deskripsi</h3>
+            <p style={{ whiteSpace: 'pre-line', marginTop: 0 }}>{listing.description}</p>
+          </>
+        )}
+      </section>
     </main>
   );
 }
