@@ -1,9 +1,8 @@
-// app/listings/[id]/page.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase } from '../../../lib/supabaseClient'; // ← TANPA alias, relatif 3 tingkat
 
 type Listing = {
   id: string;
@@ -16,23 +15,20 @@ type Listing = {
   whatsapp: string | null;
 };
 
-type ListingImage = {
-  id: string;
-  listing_id: string;
-  file_path: string; // contoh: "07c9ad8f-.../foto-1.jpg"
-  sort_order: number | null;
-};
-
 function formatPrice(n?: number | null) {
   if (typeof n !== 'number') return '';
   return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n);
 }
 
-export default function ListingDetailPage({
-  params,
-}: {
-  params: { id: string };
-}) {
+function normalizeWa(n: any): string | null {
+  if (!n) return null;
+  const d = String(n).replace(/\D/g, '');
+  if (!d) return null;
+  if (d.startsWith('0')) return '62' + d.slice(1);
+  return d;
+}
+
+export default function ListingDetailPage({ params }: { params: { id: string } }) {
   const { id } = params;
 
   const [listing, setListing] = useState<Listing | null>(null);
@@ -45,56 +41,46 @@ export default function ListingDetailPage({
   const startX = useRef<number | null>(null);
   const currentTranslate = useRef(0);
 
-  // Fetch listing + images
   useEffect(() => {
     let mounted = true;
     (async () => {
       setLoading(true);
 
-      // ambil listing
+      // 1) Ambil listing
       const { data: listingData, error: listingErr } = await supabase
         .from('listings')
-        .select('id, title, brand, year, price, location, description, whatsapp')
+        .select('id, title, brand, year, price, location, description, whatsapp, contact_whatsapp')
         .eq('id', id)
         .maybeSingle();
 
-      if (listingErr) {
-        console.error(listingErr);
+      if (listingErr || !listingData) {
+        setListing(null);
+        setImages([]);
         setLoading(false);
         return;
       }
-      if (!listingData) {
-        setLoading(false);
-        return;
+
+      // 2) Kumpulkan semua gambar dari bucket STORAGE (bucket kamu: Listing_image)
+      const urls: string[] = [];
+      const { data: files, error: listErr } = await supabase.storage
+        .from('Listing_image')
+        .list(id, { limit: 50, sortBy: { column: 'name', order: 'asc' } });
+
+      if (!listErr && files?.length) {
+        for (const f of files) {
+          const { data } = supabase.storage.from('Listing_image').getPublicUrl(`${id}/${f.name}`);
+          if (data?.publicUrl) urls.push(data.publicUrl);
+        }
       }
-
-      // ambil images
-      const { data: imgs, error: imgErr } = await supabase
-        .from('listing_images')
-        .select('file_path, sort_order')
-        .eq('listing_id', id)
-        .order('sort_order', { ascending: true })
-        .order('file_path', { ascending: true });
-
-      if (imgErr) {
-        console.error(imgErr);
-      }
-
-      // buat public URL dari setiap file_path
-      const urls: string[] =
-        (imgs || []).map((it: any) => {
-          const { data } = supabase.storage.from('listing-images').getPublicUrl(it.file_path);
-          return data.publicUrl;
-        }) ?? [];
 
       if (mounted) {
-        setListing(listingData as Listing);
+        const wa = (listingData as any).whatsapp || (listingData as any).contact_whatsapp || null;
+        setListing({ ...(listingData as Listing), whatsapp: wa });
         setImages(urls);
         setIndex(0);
         setLoading(false);
       }
     })();
-
     return () => {
       mounted = false;
     };
@@ -126,10 +112,10 @@ export default function ListingDetailPage({
   const onTouchEnd = (e: React.TouchEvent) => {
     if (startX.current == null || !trackRef.current) return;
     const delta = e.changedTouches[0].clientX - startX.current;
-    const threshold = (trackRef.current.clientWidth || 1) * 0.15; // 15% swipe
+    const threshold = (trackRef.current.clientWidth || 1) * 0.15;
     if (delta < -threshold) goTo(index + 1);
     else if (delta > threshold) goTo(index - 1);
-    else goTo(index); // snap back
+    else goTo(index);
     startX.current = null;
   };
 
@@ -137,12 +123,9 @@ export default function ListingDetailPage({
   if (loading) return <main style={{ maxWidth: 980, margin: '40px auto' }}><p>Memuat…</p></main>;
   if (!listing) return <main style={{ maxWidth: 980, margin: '40px auto' }}><p>Tidak ditemukan.</p></main>;
 
-  const waHref =
-    listing.whatsapp?.trim()
-      ? `https://wa.me/${listing.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(
-          `Halo, saya tertarik dengan unit "${listing.title}".`
-        )}`
-      : null;
+  const waHref = normalizeWa(listing.whatsapp)
+    ? `https://wa.me/${normalizeWa(listing.whatsapp)}?text=${encodeURIComponent(`Halo, saya tertarik dengan unit "${listing.title}".`)}`
+    : null;
 
   return (
     <main style={{ maxWidth: 980, margin: '28px auto', padding: '0 12px' }}>
@@ -267,7 +250,6 @@ export default function ListingDetailPage({
           <p style={{ margin: '6px 0 0', fontSize: 22, fontWeight: 800 }}>{formatPrice(listing.price)}</p>
         )}
 
-        {/* WhatsApp */}
         {waHref && (
           <div style={{ marginTop: 6 }}>
             <a
@@ -289,7 +271,6 @@ export default function ListingDetailPage({
           </div>
         )}
 
-        {/* Deskripsi */}
         {listing.description && (
           <>
             <h3 style={{ marginTop: 18, marginBottom: 8 }}>Deskripsi</h3>
