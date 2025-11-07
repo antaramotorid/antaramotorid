@@ -1,267 +1,115 @@
-// app/sell/page.tsx
-'use client';
+// app/listings/[id]/page.tsx
+import Link from "next/link";
+import { supabase } from "../../../lib/supabaseClient";
 
-import { useState, ChangeEvent, FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
-import { supabase } from '../../lib/supabaseClient';
+function normalizeWa(n: any): string | null {
+  if (!n) return null;
+  const digits = String(n).replace(/[^0-9]/g, "");
+  if (!digits) return null;
+  if (digits.startsWith("0")) return "62" + digits.slice(1);
+  if (digits.startsWith("62")) return digits;
+  return digits;
+}
 
-type FormState = {
-  title: string;
-  brand: string;
-  year: string;
-  price: string;
-  location: string;
-  description: string;
-  whatsapp: string;
-};
+export default async function ListingDetail({ params }: { params: { id: string } }) {
+  // 1) Ambil data listing
+  const { data: listing } = await supabase
+    .from("listings")
+    .select("*")
+    .eq("id", params.id)
+    .single();
 
-export default function SellPage() {
-  const router = useRouter();
-
-  const [form, setForm] = useState<FormState>({
-    title: '',
-    brand: '',
-    year: '',
-    price: '',
-    location: '',
-    description: '',
-    whatsapp: '',
-  });
-
-  const [files, setFiles] = useState<File[]>([]);
-  const [submitting, setSubmitting] = useState(false);
-  const [progress, setProgress] = useState<string>('');
-
-  function onChange(
-    e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
-  ) {
-    const { name, value } = e.target;
-    setForm((s) => ({ ...s, [name]: value }));
+  if (!listing) {
+    return (
+      <main style={{ maxWidth: 960, margin: "40px auto" }}>
+        <h1>Listing tidak ditemukan</h1>
+        <p><Link href="/listings">← Kembali</Link></p>
+      </main>
+    );
   }
 
-  function onPickFiles(e: ChangeEvent<HTMLInputElement>) {
-    const f = Array.from(e.target.files || []);
-    // batasi maksimal 6 file
-    const selected = f.slice(0, 6);
-    setFiles(selected);
+  // 2) Kumpulkan semua gambar dari bucket mana pun yang tersedia
+  const candidateBuckets = ["Listing_image", "listing-images", "listing_images"];
+  const imageUrls: string[] = [];
+
+  for (const bucket of candidateBuckets) {
+    const { data: files, error } = await supabase.storage.from(bucket).list(params.id, { limit: 50 });
+    if (error) continue;
+    if (!files?.length) continue;
+
+    for (const f of files) {
+      const { data } = supabase.storage.from(bucket).getPublicUrl(`${params.id}/${f.name}`);
+      if (data?.publicUrl) imageUrls.push(data.publicUrl);
+    }
+    if (imageUrls.length) break; // stop di bucket pertama yang punya isi
   }
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!form.title || !form.brand || !form.year || !form.price) {
-      alert('Judul, Merek, Tahun, dan Harga wajib diisi.');
-      return;
-    }
-    if (files.length === 0) {
-      if (!confirm('Belum pilih foto. Lanjut tanpa foto?')) return;
-    }
-    setSubmitting(true);
-    setProgress('Menyimpan listing...');
+  // 3) Util format & WA
+  const rp = (n: any) =>
+    typeof n === "number"
+      ? new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n)
+      : "—";
 
-    // 1) Insert ke tabel listings
-    const { data: inserted, error: insertErr } = await supabase
-      .from('listings')
-      .insert([
-        {
-          title: form.title.trim(),
-          brand: form.brand.trim(),
-          year: form.year ? Number(form.year) : null,
-          price: form.price ? Number(form.price) : null,
-          location: form.location.trim() || null,
-          description: form.description.trim() || null,
-          whatsapp: form.whatsapp.trim() || null,
-        },
-      ])
-      .select('id')
-      .single();
-
-    if (insertErr || !inserted?.id) {
-      alert(insertErr?.message || 'Gagal menyimpan listing');
-      setSubmitting(false);
-      return;
-    }
-
-    const listingId = inserted.id as string;
-
-    // 2) Upload semua file (jika ada)
-    if (files.length > 0) {
-      let idx = 0;
-      for (const file of files) {
-        idx++;
-        setProgress(`Mengunggah foto ${idx}/${files.length}...`);
-
-        // nama file aman: timestamp-index-originalName tanpa spasi
-        const safeName = `${Date.now()}-${idx}-${file.name}`
-          .replace(/\s+/g, '-')
-          .toLowerCase();
-
-        // path di bucket: {listingId}/{safeName}
-        const path = `${listingId}/${safeName}`;
-
-        const { error: upErr } = await supabase
-          .storage
-          .from('listing-images')
-          .upload(path, file, { upsert: false });
-
-        if (upErr) {
-          alert(`Upload gagal untuk ${file.name}: ${upErr.message}`);
-          // lanjut ke file berikutnya; tidak batalkan seluruh proses
-          continue;
-        }
-
-        // 3) Catat ke tabel listing_images
-        const { error: imgErr } = await supabase
-          .from('listing_images')
-          .insert([{ listing_id: listingId, file_path: path }]);
-
-        if (imgErr) {
-          alert(`Gagal mencatat gambar ${file.name}: ${imgErr.message}`);
-          // lanjut ke file berikutnya
-        }
-      }
-    }
-
-    setProgress('Selesai. Mengarahkan ke halaman detail...');
-    router.push(`/listings/${listingId}`);
-  }
+  const phoneRaw = (listing as any).whatsapp || (listing as any).contact_whatsapp || null;
+  const wa = normalizeWa(phoneRaw);
 
   return (
-    <main style={{ maxWidth: 820, margin: '32px auto', padding: '0 16px' }}>
-      <h1 style={{ fontWeight: 800, fontSize: 28, marginBottom: 16 }}>Jual Motor</h1>
+    <main style={{ maxWidth: 1100, margin: "40px auto", padding: "0 16px" }}>
+      <p><Link href="/listings">← Kembali ke Listings</Link></p>
 
-      <form onSubmit={onSubmit} style={{ display: 'grid', gap: 14 }}>
-        <label style={{ display: 'grid', gap: 6 }}>
-          <span>Judul Listing *</span>
-          <input
-            name="title"
-            value={form.title}
-            onChange={onChange}
-            required
-            placeholder="Contoh: Yamaha Fazzio"
-            style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
-          />
-        </label>
-
-        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr', alignItems: 'start' }}>
-          <label style={{ display: 'grid', gap: 6 }}>
-            <span>Merek *</span>
-            <input
-              name="brand"
-              value={form.brand}
-              onChange={onChange}
-              required
-              placeholder="honda / yamaha / suzuki"
-              style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
-            />
-          </label>
-          <label style={{ display: 'grid', gap: 6 }}>
-            <span>Tahun *</span>
-            <input
-              name="year"
-              value={form.year}
-              onChange={onChange}
-              required
-              inputMode="numeric"
-              placeholder="2020"
-              style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
-            />
-          </label>
+      {/* Foto besar */}
+      {imageUrls.length ? (
+        <img
+          src={imageUrls[0]}
+          alt={listing.title || "foto unit"}
+          style={{ width: "100%", borderRadius: 12, marginTop: 12, objectFit: "cover", maxHeight: 520 }}
+        />
+      ) : (
+        <div style={{ width: "100%", aspectRatio: "16/9", background: "#f3f4f6", borderRadius: 12, display: "grid", placeItems: "center", color: "#9ca3af", marginTop: 12 }}>
+          Tidak ada foto
         </div>
+      )}
 
-        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr', alignItems: 'start' }}>
-          <label style={{ display: 'grid', gap: 6 }}>
-            <span>Harga (Rp) *</span>
-            <input
-              name="price"
-              value={form.price}
-              onChange={onChange}
-              required
-              inputMode="numeric"
-              placeholder="19999999"
-              style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
+      {/* Thumbnails */}
+      {imageUrls.length > 1 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(120px,1fr))", gap: 10, marginTop: 10 }}>
+          {imageUrls.slice(1).map((url, i) => (
+            <img
+              key={i}
+              src={url}
+              alt={`thumb-${i + 2}`}
+              style={{ width: "100%", height: 100, objectFit: "cover", borderRadius: 8 }}
             />
-          </label>
-          <label style={{ display: 'grid', gap: 6 }}>
-            <span>Lokasi</span>
-            <input
-              name="location"
-              value={form.location}
-              onChange={onChange}
-              placeholder="Kota/Kabupaten"
-              style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
-            />
-          </label>
+          ))}
         </div>
+      )}
 
-        <label style={{ display: 'grid', gap: 6 }}>
-          <span>Deskripsi</span>
-          <textarea
-            name="description"
-            value={form.description}
-            onChange={onChange}
-            rows={4}
-            placeholder="Kondisi, pajak, KM, dll"
-            style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
-          />
-        </label>
+      {/* Info */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 18, flexWrap: "wrap" }}>
+        <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0 }}>{listing.title}</h1>
+        {wa && (
+          <a
+            href={`https://wa.me/${wa}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ padding: "10px 14px", border: "1px solid #10b981", borderRadius: 10 }}
+          >
+            Chat via WhatsApp
+          </a>
+        )}
+      </div>
 
-        <label style={{ display: 'grid', gap: 6 }}>
-          <span>WhatsApp (opsional)</span>
-          <input
-            name="whatsapp"
-            value={form.whatsapp}
-            onChange={onChange}
-            placeholder="62xxxxxxxxxxx"
-            style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
-          />
-        </label>
+      <p style={{ color: "#6b7280", marginTop: 6 }}>
+        {listing.brand || "—"} • {listing.year ?? "—"} {listing.location ? `• ${listing.location}` : ""}
+      </p>
+      <p style={{ fontSize: 22, fontWeight: 800, marginTop: 10 }}>{rp(listing.price)}</p>
 
-        <label style={{ display: 'grid', gap: 6 }}>
-          <span>Foto Unit (maks 6) — bisa pilih banyak sekaligus</span>
-          <input
-            type="file"
-            accept="image/*"
-            multiple
-            onChange={onPickFiles}
-          />
-          {files.length > 0 && (
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill,minmax(96px,1fr))',
-              gap: 8,
-              marginTop: 8
-            }}>
-              {files.map((f, i) => (
-                <div key={i} style={{ border: '1px solid #eee', borderRadius: 8, padding: 6 }}>
-                  <div style={{ fontSize: 12, marginBottom: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {f.name}
-                  </div>
-                  <img
-                    src={URL.createObjectURL(f)}
-                    alt={f.name}
-                    style={{ width: '100%', height: 80, objectFit: 'cover', borderRadius: 6 }}
-                  />
-                </div>
-              ))}
-            </div>
-          )}
-        </label>
-
-        <button
-          type="submit"
-          disabled={submitting}
-          style={{
-            background: '#2563eb',
-            color: '#fff',
-            border: 0,
-            borderRadius: 10,
-            padding: '12px 14px',
-            fontWeight: 700
-          }}
-        >
-          {submitting ? (progress || 'Menyimpan...') : 'Simpan'}
-        </button>
-      </form>
+      {listing.description && (
+        <>
+          <h3 style={{ fontSize: 18, fontWeight: 700, marginTop: 18 }}>Deskripsi</h3>
+          <p style={{ whiteSpace: "pre-wrap" }}>{listing.description}</p>
+        </>
+      )}
     </main>
   );
 }
