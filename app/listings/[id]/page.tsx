@@ -2,8 +2,17 @@
 import Link from "next/link";
 import { supabase } from "../../../lib/supabaseClient";
 
+function normalizeWa(n: any): string | null {
+  if (!n) return null;
+  const digits = String(n).replace(/[^0-9]/g, "");
+  if (!digits) return null;
+  if (digits.startsWith("0")) return "62" + digits.slice(1);
+  if (digits.startsWith("62")) return digits;
+  return digits; // fallback
+}
+
 export default async function ListingDetail({ params }: { params: { id: string } }) {
-  // 1) data listing
+  // — Fetch listing
   const { data: listing } = await supabase
     .from("listings")
     .select("*")
@@ -19,39 +28,15 @@ export default async function ListingDetail({ params }: { params: { id: string }
     );
   }
 
-  // 2) ambil path dari tabel (kalau ada)
-  const { data: imgs } = await supabase
-    .from("listing_images")
-    .select("file_path, sort_order, created_at")
-    .eq("listing_id", params.id)
-    .order("sort_order", { ascending: true, nullsFirst: true })
-    .order("created_at", { ascending: true });
-
-  const firstPath = (imgs?.[0]?.file_path || "").replace(/^listing[-_]images\//, "");
-  const expectFileName = firstPath.split("/").pop() || null;
-
-  // 3) cari file di Storage (prioritas bucket yang kamu sebutkan)
+  // — Try to get image from bucket(s)
   const buckets = ["Listing_image", "listing-images", "listing_images"];
   let imageUrl: string | null = null;
 
   for (const bucket of buckets) {
-    // list isi folder <id>/ di bucket
-    const { data: files } = await supabase.storage.from(bucket).list(params.id, {
-      limit: 100,
-      sortBy: { column: "name", order: "asc" },
-    });
-
-    if (files && files.length) {
-      // kalau kita tahu nama file dari DB, pakai itu; kalau tidak, pakai file pertama
-      const chosen =
-        (expectFileName && files.find((f) => f.name === expectFileName)?.name) ||
-        files[0].name;
-
-      const { data } = supabase
-        .storage
-        .from(bucket)
-        .getPublicUrl(`${params.id}/${chosen}`);
-
+    const { data: files } = await supabase.storage.from(bucket).list(params.id, { limit: 50 });
+    if (files?.length) {
+      const chosen = files[0].name;
+      const { data } = supabase.storage.from(bucket).getPublicUrl(`${params.id}/${chosen}`);
       if (data?.publicUrl) {
         imageUrl = data.publicUrl;
         break;
@@ -64,26 +49,36 @@ export default async function ListingDetail({ params }: { params: { id: string }
       ? new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n)
       : "—";
 
+  // — Handle WA from either column
+  const phoneRaw = (listing as any).whatsapp || (listing as any).contact_whatsapp || null;
+  const wa = normalizeWa(phoneRaw);
+
   return (
     <main style={{ maxWidth: 1000, margin: "40px auto", padding: "0 16px" }}>
       <p><Link href="/listings">← Kembali ke Listings</Link></p>
 
       {imageUrl ? (
-        <img
-          src={imageUrl}
-          alt={listing.title || "foto unit"}
-          style={{ width: "100%", borderRadius: 12, marginTop: 12 }}
-        />
+        <img src={imageUrl} alt={listing.title || "foto unit"} style={{ width: "100%", borderRadius: 12, marginTop: 12 }} />
       ) : (
-        <div style={{
-          width: "100%", aspectRatio: "16/9", background: "#f3f4f6",
-          borderRadius: 12, display: "grid", placeItems: "center", color: "#9ca3af", marginTop: 12
-        }}>
+        <div style={{ width: "100%", aspectRatio: "16/9", background: "#f3f4f6", borderRadius: 12, display: "grid", placeItems: "center", color: "#9ca3af", marginTop: 12 }}>
           Tidak ada foto
         </div>
       )}
 
-      <h1 style={{ fontSize: 28, fontWeight: 800, marginTop: 16 }}>{listing.title}</h1>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 16, flexWrap: "wrap" }}>
+        <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0 }}>{listing.title}</h1>
+        {wa && (
+          <a
+            href={`https://wa.me/${wa}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ padding: "8px 12px", border: "1px solid #10b981", borderRadius: 10 }}
+          >
+            Chat via WhatsApp
+          </a>
+        )}
+      </div>
+
       <p style={{ color: "#6b7280", marginTop: 6 }}>
         {listing.brand || "—"} • {listing.year ?? "—"} {listing.location ? `• ${listing.location}` : ""}
       </p>
@@ -94,17 +89,6 @@ export default async function ListingDetail({ params }: { params: { id: string }
           <h3 style={{ fontSize: 18, fontWeight: 700, marginTop: 18 }}>Deskripsi</h3>
           <p style={{ whiteSpace: "pre-wrap" }}>{listing.description}</p>
         </>
-      )}
-
-      {listing.whatsapp && (
-        <a
-          href={`https://wa.me/${String(listing.whatsapp).replace(/[^0-9]/g, "")}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ display: "inline-block", marginTop: 18, padding: "10px 14px", border: "1px solid #10b981", borderRadius: 10 }}
-        >
-          Chat via WhatsApp
-        </a>
       )}
     </main>
   );
