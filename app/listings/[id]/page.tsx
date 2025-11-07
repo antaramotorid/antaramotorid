@@ -1,18 +1,15 @@
 import Link from "next/link";
 import { supabase } from "../../../lib/supabaseClient";
 
-// Bantu rapikan path: buang prefix bucket kalau ikut tersimpan di kolom file_path
-function normalizePath(p?: string | null) {
+function norm(p?: string | null) {
   if (!p) return null;
   return p.replace(/^listing_images\//, "").replace(/^listing-images\//, "");
 }
 
 export default async function ListingDetail({
   params,
-}: {
-  params: { id: string };
-}) {
-  // 1) Ambil data listing
+}: { params: { id: string } }) {
+  // 1) Listing
   const { data: listing, error } = await supabase
     .from("listings")
     .select("*")
@@ -21,7 +18,7 @@ export default async function ListingDetail({
 
   if (error || !listing) {
     return (
-      <div className="max-w-3xl mx-auto py-10">
+      <div className="max-w-4xl mx-auto py-10">
         <h1 className="text-xl font-bold mb-3">Terjadi kesalahan</h1>
         <p className="mb-6">ID tidak valid: {params.id}</p>
         <Link href="/listings" className="text-blue-600 underline">
@@ -31,7 +28,7 @@ export default async function ListingDetail({
     );
   }
 
-  // 2) Ambil gambar pertama (urutkan sort_order lalu created_at)
+  // 2) Coba ambil path dari tabel listing_images
   const { data: imgs } = await supabase
     .from("listing_images")
     .select("file_path, sort_order, created_at")
@@ -39,16 +36,44 @@ export default async function ListingDetail({
     .order("sort_order", { ascending: true, nullsFirst: true })
     .order("created_at", { ascending: true });
 
+  // 3) Bangun public URL secara robust:
+  // - Support bucket "listing_images" (underscore) ATAU "listing-images" (dash)
+  // - Jika file_path tidak ada/invalid, fallback: list isi folder <id>/ di storage
+  const candidatesBuckets = ["listing_images", "listing-images"];
   let imageUrl: string | null = null;
-  if (imgs && imgs.length > 0) {
-    const pathInBucket = normalizePath(imgs[0].file_path);
-    if (pathInBucket) {
-      // PENTING: nama bucket pakai "listing_images" (underscore) sesuai punyamu sekarang
-      const { data } = supabase
-        .storage
-        .from("listing_images")
-        .getPublicUrl(pathInBucket);
-      imageUrl = data?.publicUrl ?? null;
+
+  // 3a. Dari kolom file_path
+  if (!imageUrl && imgs && imgs.length > 0) {
+    const p = norm(imgs[0].file_path || "");
+    for (const bucket of candidatesBuckets) {
+      if (p) {
+        const { data } = supabase.storage.from(bucket).getPublicUrl(p);
+        if (data?.publicUrl) {
+          imageUrl = data.publicUrl;
+          break;
+        }
+      }
+    }
+  }
+
+  // 3b. Fallback: scan folder <id>/ dan ambil file pertama yang ada
+  if (!imageUrl) {
+    for (const bucket of candidatesBuckets) {
+      const { data: listRes, error: listErr } = await supabase.storage
+        .from(bucket)
+        .list(`${params.id}`, { limit: 1, sortBy: { column: "name", order: "asc" } });
+
+      if (!listErr && listRes && listRes.length > 0) {
+        const firstName = listRes[0].name;
+        const { data } = supabase
+          .storage
+          .from(bucket)
+          .getPublicUrl(`${params.id}/${firstName}`);
+        if (data?.publicUrl) {
+          imageUrl = data.publicUrl;
+          break;
+        }
+      }
     }
   }
 
