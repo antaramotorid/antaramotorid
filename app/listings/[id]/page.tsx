@@ -1,8 +1,9 @@
+// app/listings/[id]/page.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { supabase } from '../../../lib/supabaseClient'; // ← TANPA alias, relatif 3 tingkat
+import { supabase } from '../../../lib/supabaseClient'; // tanpa alias
 
 type Listing = {
   id: string;
@@ -13,13 +14,13 @@ type Listing = {
   location: string | null;
   description: string | null;
   whatsapp: string | null;
+  contact_whatsapp?: string | null;
 };
 
 function formatPrice(n?: number | null) {
   if (typeof n !== 'number') return '';
   return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n);
 }
-
 function normalizeWa(n: any): string | null {
   if (!n) return null;
   const d = String(n).replace(/\D/g, '');
@@ -60,18 +61,27 @@ export default function ListingDetailPage({ params }: { params: { id: string } }
         return;
       }
 
-      // 2) Kumpulkan semua gambar dari bucket STORAGE (bucket kamu: Listing_image)
-      const urls: string[] = [];
-      const { data: files, error: listErr } = await supabase.storage
-        .from('Listing_image')
-        .list(id, { limit: 50, sortBy: { column: 'name', order: 'asc' } });
+      // 2) Ambil daftar file dari TABEL listing_images (BUKAN storage.list)
+      const { data: rows, error: imgErr } = await supabase
+        .from('listing_images')
+        .select('file_path, sort_order')
+        .eq('listing_id', id)
+        .order('sort_order', { ascending: true, nullsFirst: true })
+        .order('file_path', { ascending: true });
 
-      if (!listErr && files?.length) {
-        for (const f of files) {
-          const { data } = supabase.storage.from('Listing_image').getPublicUrl(`${id}/${f.name}`);
-          if (data?.publicUrl) urls.push(data.publicUrl);
-        }
+      if (imgErr) {
+        console.error('listing_images error:', imgErr);
       }
+
+      // 3) Bangun public URL dari bucket yang benar: "Listing_image"
+      const urls: string[] = (rows || [])
+        .map((r) => {
+          const path = (r as any).file_path as string | null;
+          if (!path) return null;
+          const { data } = supabase.storage.from('Listing_image').getPublicUrl(path);
+          return data?.publicUrl || null;
+        })
+        .filter((u): u is string => !!u);
 
       if (mounted) {
         const wa = (listingData as any).whatsapp || (listingData as any).contact_whatsapp || null;
