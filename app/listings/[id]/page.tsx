@@ -1,34 +1,25 @@
+// app/listings/[id]/page.tsx
 import Link from "next/link";
 import { supabase } from "../../../lib/supabaseClient";
 
-function norm(p?: string | null) {
-  if (!p) return null;
-  return p.replace(/^listing_images\//, "").replace(/^listing-images\//, "");
-}
-
-export default async function ListingDetail({
-  params,
-}: { params: { id: string } }) {
-  // 1) Listing
-  const { data: listing, error } = await supabase
+export default async function ListingDetail({ params }: { params: { id: string } }) {
+  // 1) data listing
+  const { data: listing } = await supabase
     .from("listings")
     .select("*")
     .eq("id", params.id)
     .single();
 
-  if (error || !listing) {
+  if (!listing) {
     return (
-      <div className="max-w-4xl mx-auto py-10">
-        <h1 className="text-xl font-bold mb-3">Terjadi kesalahan</h1>
-        <p className="mb-6">ID tidak valid: {params.id}</p>
-        <Link href="/listings" className="text-blue-600 underline">
-          ← Kembali ke Listings
-        </Link>
-      </div>
+      <main style={{ maxWidth: 960, margin: "40px auto" }}>
+        <h1>Listing tidak ditemukan</h1>
+        <p><Link href="/listings">← Kembali</Link></p>
+      </main>
     );
   }
 
-  // 2) Coba ambil path dari tabel listing_images
+  // 2) ambil path dari tabel (kalau ada)
   const { data: imgs } = await supabase
     .from("listing_images")
     .select("file_path, sort_order, created_at")
@@ -36,86 +27,85 @@ export default async function ListingDetail({
     .order("sort_order", { ascending: true, nullsFirst: true })
     .order("created_at", { ascending: true });
 
-  // 3) Bangun public URL secara robust:
-  // - Support bucket "listing_images" (underscore) ATAU "listing-images" (dash)
-  // - Jika file_path tidak ada/invalid, fallback: list isi folder <id>/ di storage
-  const candidatesBuckets = ["listing_images", "listing-images"];
+  const firstPath = (imgs?.[0]?.file_path || "").replace(/^listing[-_]images\//, "");
+  const expectFileName = firstPath.split("/").pop() || null;
+
+  // 3) cari file di Storage (prioritas bucket yang kamu sebutkan)
+  const buckets = ["Listing_image", "listing-images", "listing_images"];
   let imageUrl: string | null = null;
 
-  // 3a. Dari kolom file_path
-  if (!imageUrl && imgs && imgs.length > 0) {
-    const p = norm(imgs[0].file_path || "");
-    for (const bucket of candidatesBuckets) {
-      if (p) {
-        const { data } = supabase.storage.from(bucket).getPublicUrl(p);
-        if (data?.publicUrl) {
-          imageUrl = data.publicUrl;
-          break;
-        }
-      }
-    }
-  }
+  for (const bucket of buckets) {
+    // list isi folder <id>/ di bucket
+    const { data: files } = await supabase.storage.from(bucket).list(params.id, {
+      limit: 100,
+      sortBy: { column: "name", order: "asc" },
+    });
 
-  // 3b. Fallback: scan folder <id>/ dan ambil file pertama yang ada
-  if (!imageUrl) {
-    for (const bucket of candidatesBuckets) {
-      const { data: listRes, error: listErr } = await supabase.storage
+    if (files && files.length) {
+      // kalau kita tahu nama file dari DB, pakai itu; kalau tidak, pakai file pertama
+      const chosen =
+        (expectFileName && files.find((f) => f.name === expectFileName)?.name) ||
+        files[0].name;
+
+      const { data } = supabase
+        .storage
         .from(bucket)
-        .list(`${params.id}`, { limit: 1, sortBy: { column: "name", order: "asc" } });
+        .getPublicUrl(`${params.id}/${chosen}`);
 
-      if (!listErr && listRes && listRes.length > 0) {
-        const firstName = listRes[0].name;
-        const { data } = supabase
-          .storage
-          .from(bucket)
-          .getPublicUrl(`${params.id}/${firstName}`);
-        if (data?.publicUrl) {
-          imageUrl = data.publicUrl;
-          break;
-        }
+      if (data?.publicUrl) {
+        imageUrl = data.publicUrl;
+        break;
       }
     }
   }
+
+  const rp = (n: any) =>
+    typeof n === "number"
+      ? new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n)
+      : "—";
 
   return (
-    <div className="max-w-4xl mx-auto py-8">
-      <Link href="/listings" className="text-blue-600 underline">
-        ← Kembali ke Listings
-      </Link>
+    <main style={{ maxWidth: 1000, margin: "40px auto", padding: "0 16px" }}>
+      <p><Link href="/listings">← Kembali ke Listings</Link></p>
 
       {imageUrl ? (
         <img
           src={imageUrl}
-          alt={listing.title}
-          className="w-full h-auto rounded-lg mt-6"
+          alt={listing.title || "foto unit"}
+          style={{ width: "100%", borderRadius: 12, marginTop: 12 }}
         />
       ) : (
-        <div className="mt-6 w-full aspect-[16/9] bg-gray-100 rounded-lg grid place-items-center text-gray-500">
+        <div style={{
+          width: "100%", aspectRatio: "16/9", background: "#f3f4f6",
+          borderRadius: 12, display: "grid", placeItems: "center", color: "#9ca3af", marginTop: 12
+        }}>
           Tidak ada foto
         </div>
       )}
 
-      <h1 className="text-3xl font-extrabold mt-6">{listing.title}</h1>
-      <p className="text-gray-700 mt-2">
-        {listing.brand} • {listing.year} • {listing.location}
+      <h1 style={{ fontSize: 28, fontWeight: 800, marginTop: 16 }}>{listing.title}</h1>
+      <p style={{ color: "#6b7280", marginTop: 6 }}>
+        {listing.brand || "—"} • {listing.year ?? "—"} {listing.location ? `• ${listing.location}` : ""}
       </p>
-      <p className="text-2xl font-bold mt-4">
-        Rp {Number(listing.price).toLocaleString("id-ID")}
-      </p>
+      <p style={{ fontSize: 22, fontWeight: 800, marginTop: 10 }}>{rp(listing.price)}</p>
 
       {listing.description && (
-        <p className="mt-6 leading-relaxed">{listing.description}</p>
+        <>
+          <h3 style={{ fontSize: 18, fontWeight: 700, marginTop: 18 }}>Deskripsi</h3>
+          <p style={{ whiteSpace: "pre-wrap" }}>{listing.description}</p>
+        </>
       )}
 
       {listing.whatsapp && (
         <a
-          href={`https://wa.me/${listing.whatsapp}`}
+          href={`https://wa.me/${String(listing.whatsapp).replace(/[^0-9]/g, "")}`}
           target="_blank"
-          className="inline-block mt-8 bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-lg"
+          rel="noopener noreferrer"
+          style={{ display: "inline-block", marginTop: 18, padding: "10px 14px", border: "1px solid #10b981", borderRadius: 10 }}
         >
           Chat via WhatsApp
         </a>
       )}
-    </div>
+    </main>
   );
 }
