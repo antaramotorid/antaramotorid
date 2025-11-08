@@ -70,7 +70,7 @@ export default async function ListingDetail({ params }: { params: { id: string }
     }
   }
 
-  // 3) Kumpulkan semua video (prioritas dari tabel pending, lalu scan folder)
+  // 3) Kumpulkan semua video
   let videoUrls: string[] = [];
   const { data: pending } = await supabase
     .from("listing_videos_pending")
@@ -88,10 +88,10 @@ export default async function ListingDetail({ params }: { params: { id: string }
     if (scan.length) videoUrls = scan;
   }
 
-  // 4) Susun media: video dulu, lalu foto
+  // 4) Susun media: video dulu, lalu foto  (PAKAI `type`, BUKAN `kind`)
   const media: MediaItem[] = [
-    ...videoUrls.map((url) => ({ kind: "video" as const, url })),
-    ...imageUrls.map((url) => ({ kind: "image" as const, url })),
+    ...videoUrls.map((url) => ({ type: "video" as const, url })),
+    ...imageUrls.map((url) => ({ type: "image" as const, url })),
   ];
 
   // 5) Util format & WA
@@ -115,7 +115,7 @@ export default async function ListingDetail({ params }: { params: { id: string }
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         {media.map((m, i) => (
           <div key={i} style={{ width: 78, height: 78, borderRadius: 8, overflow: "hidden", border: "1px solid #e5e7eb" }}>
-            {m.kind === "image" ? (
+            {m.type === "image" ? (
               <img src={m.url} alt={`thumb-${i}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             ) : (
               <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", background: "#f3f4f6" }}>▶</div>
@@ -154,5 +154,5 @@ export default async function ListingDetail({ params }: { params: { id: string }
   );
 }
 
-// IMPORT SETELAH EXPORT DEFAULT, TETAP SERVER (tidak ada "use client" di file ini)
+// IMPORT SETELAH EXPORT DEFAULT, tetap server file (tanpa "use client" di sini)
 import MediaViewer from "./MediaViewer";
