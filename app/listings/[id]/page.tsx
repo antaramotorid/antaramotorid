@@ -3,6 +3,7 @@ import Link from "next/link";
 import { supabase } from "../../../lib/supabaseClient";
 import dynamic from "next/dynamic";
 
+// -------- util ----------
 function normalizeWa(n: any): string | null {
   if (!n) return null;
   const digits = String(n).replace(/[^0-9]/g, "");
@@ -12,9 +13,10 @@ function normalizeWa(n: any): string | null {
   return digits;
 }
 
-// Client component (slider) terpisah agar "use client" tidak mengacau build
+// Client-only viewer (sudah hijau)
 const MediaViewer = dynamic(() => import("./MediaViewer"), { ssr: false });
 
+// Type media untuk slider
 type MediaItem =
   | { kind: "video"; url: string; thumb?: string }
   | { kind: "image"; url: string };
@@ -35,14 +37,12 @@ export default async function ListingDetail({
     return (
       <main style={{ maxWidth: 960, margin: "40px auto" }}>
         <h1>Listing tidak ditemukan</h1>
-        <p>
-          <Link href="/listings">← Kembali</Link>
-        </p>
+        <p><Link href="/listings">← Kembali</Link></p>
       </main>
     );
   }
 
-  // 2) Ambil gambar dari bucket yang mungkin
+  // 2) Foto dari beberapa bucket
   const imageBuckets = ["Listing_image", "listing-images", "listing_images"];
   const imageUrls: string[] = [];
   for (const bucket of imageBuckets) {
@@ -50,6 +50,7 @@ export default async function ListingDetail({
       .from(bucket)
       .list(params.id, { limit: 50 });
     if (error || !files?.length) continue;
+
     for (const f of files) {
       const { data } = supabase.storage
         .from(bucket)
@@ -59,13 +60,13 @@ export default async function ListingDetail({
     if (imageUrls.length) break;
   }
 
-  // 3) Ambil video dari kedua bucket (approved & pending)
+  // 3) Video dari approved & pending
   const videoBuckets = ["listing-videos", "listing-videos-pending"];
   const videoUrls: string[] = [];
   for (const bucket of videoBuckets) {
     const { data: files, error } = await supabase.storage
       .from(bucket)
-      .list(params.id, { limit: 10 }); // 10 cukup
+      .list(params.id, { limit: 10 });
     if (error || !files?.length) continue;
 
     for (const f of files) {
@@ -77,14 +78,18 @@ export default async function ListingDetail({
         .getPublicUrl(`${params.id}/${f.name}`);
       if (data?.publicUrl) videoUrls.push(data.publicUrl);
     }
-    // tidak break: kalau ada di approved & pending, tetap gabung (approved dulu karena urutan array)
   }
 
-  // 4) Susun media: video dulu, lalu foto
-  const media: MediaItem[] = [
-    ...videoUrls.map((url) => ({ kind: "video", url })),
-    ...imageUrls.map((url) => ({ kind: "image", url })),
-  ];
+  // 4) Susun media: video dulu lalu foto (FIX tipe dengan as const)
+  const videoItems: MediaItem[] = videoUrls.map((url) => ({
+    kind: "video" as const,
+    url,
+  }));
+  const imageItems: MediaItem[] = imageUrls.map((url) => ({
+    kind: "image" as const,
+    url,
+  }));
+  const media: MediaItem[] = [...videoItems, ...imageItems];
 
   const rp = (n: any) =>
     typeof n === "number"
@@ -101,41 +106,24 @@ export default async function ListingDetail({
 
   return (
     <main style={{ maxWidth: 1100, margin: "40px auto", padding: "0 16px" }}>
-      <p>
-        <Link href="/listings">← Kembali ke Listings</Link>
-      </p>
+      <p><Link href="/listings">← Kembali ke Listings</Link></p>
 
-      {/* Viewer foto & video (video muncul pertama kalau ada) */}
+      {/* Slider foto & video (video tampil pertama bila ada) */}
       <MediaViewer media={media} title={listing.title || "Unit"} />
 
-      {/* Label thumbnail */}
       <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12 }}>
         Foto &amp; Video Unit
       </h3>
 
       {/* Info utama */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          marginTop: 18,
-          flexWrap: "wrap",
-        }}
-      >
-        <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0 }}>
-          {listing.title}
-        </h1>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 18, flexWrap: "wrap" }}>
+        <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0 }}>{listing.title}</h1>
         {wa && (
           <a
             href={`https://wa.me/${wa}`}
             target="_blank"
             rel="noopener noreferrer"
-            style={{
-              padding: "10px 14px",
-              border: "1px solid #10b981",
-              borderRadius: 10,
-            }}
+            style={{ padding: "10px 14px", border: "1px solid #10b981", borderRadius: 10 }}
           >
             Chat via WhatsApp
           </a>
@@ -143,42 +131,27 @@ export default async function ListingDetail({
       </div>
 
       <p style={{ color: "#6b7280", marginTop: 6 }}>
-        {listing.brand || "—"} • {listing.year ?? "—"}
-        {listing.location ? ` • ${listing.location}` : ""}
+        {listing.brand || "—"} • {listing.year ?? "—"}{listing.location ? ` • ${listing.location}` : ""}
       </p>
-      <p style={{ fontSize: 22, fontWeight: 800, marginTop: 10 }}>
-        {rp(listing.price)}
-      </p>
+      <p style={{ fontSize: 22, fontWeight: 800, marginTop: 10 }}>{rp(listing.price)}</p>
 
       {listing.description && (
         <>
-          <h3 style={{ fontSize: 18, fontWeight: 700, marginTop: 18 }}>
-            Deskripsi
-          </h3>
+          <h3 style={{ fontSize: 18, fontWeight: 700, marginTop: 18 }}>Deskripsi</h3>
           <p style={{ whiteSpace: "pre-wrap" }}>{listing.description}</p>
         </>
       )}
 
-      {/* Peta Lokasi (tetap seperti versi yang sudah kerja) */}
+      {/* Peta lokasi */}
       {listing.location && (
         <section style={{ marginTop: 24 }}>
-          <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>
-            Lokasi Penjual
-          </h3>
+          <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>Lokasi Penjual</h3>
           <iframe
             title="Lokasi"
-            style={{
-              width: "100%",
-              height: 320,
-              border: 0,
-              borderRadius: 12,
-              background: "#f3f4f6",
-            }}
+            style={{ width: "100%", height: 320, border: 0, borderRadius: 12, background: "#f3f4f6" }}
             loading="lazy"
             referrerPolicy="no-referrer-when-downgrade"
-            src={`https://www.google.com/maps?q=${encodeURIComponent(
-              listing.location
-            )}&output=embed`}
+            src={`https://www.google.com/maps?q=${encodeURIComponent(listing.location)}&output=embed`}
           />
         </section>
       )}
