@@ -1,6 +1,5 @@
 // app/listings/page.tsx
 import Link from "next/link";
-import { noStore } from "next/cache";
 import { supabase } from "../../lib/supabaseClient";
 
 /** Cari 1 foto pertama untuk sebuah listingId dari bucket yang tersedia */
@@ -30,10 +29,11 @@ function rp(n: any) {
     : "—";
 }
 
-export const revalidate = 0; // pastikan tidak di-prerender/cached
-export default async function ListingsPage() {
-  noStore(); // matikan cache di level runtime
+// Paksa selalu ambil data terbaru
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
+export default async function ListingsPage() {
   // Ambil daftar listing terbaru
   const { data: listings } = await supabase
     .from("listings")
