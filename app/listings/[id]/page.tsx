@@ -1,10 +1,9 @@
 // app/listings/[id]/page.tsx
 import Link from "next/link";
 import { supabase } from "../../../lib/supabaseClient";
+import type { MediaItem } from "./MediaViewer";
 
-export const dynamic = "force-dynamic"; // pastikan tidak tersangkut cache
-
-type MediaItem = { kind: "image" | "video"; url: string; thumb?: string };
+export const dynamic = "force-dynamic"; // hindari cache
 
 function normalizeWa(n: any): string | null {
   if (!n) return null;
@@ -47,7 +46,7 @@ export default async function ListingDetail({ params }: { params: { id: string }
     );
   }
 
-  // 2) Kumpulkan semua foto
+  // 2) Kumpulkan semua foto (cari di beberapa bucket umum)
   const imageBuckets = ["listing-images", "Listing_image", "listing_images"];
   let imageUrls: string[] = [];
   for (const b of imageBuckets) {
@@ -62,6 +61,7 @@ export default async function ListingDetail({ params }: { params: { id: string }
       .eq("listing_id", params.id)
       .order("sort_order", { ascending: true })
       .limit(12);
+
     for (const r of imgRows ?? []) {
       for (const b of imageBuckets) {
         const { data } = supabase.storage.from(b).getPublicUrl(r.file_path);
@@ -70,7 +70,7 @@ export default async function ListingDetail({ params }: { params: { id: string }
     }
   }
 
-  // 3) Kumpulkan semua video
+  // 3) Kumpulkan semua video (prioritas dari tabel pending, lalu scan folder)
   let videoUrls: string[] = [];
   const { data: pending } = await supabase
     .from("listing_videos_pending")
@@ -84,7 +84,6 @@ export default async function ListingDetail({ params }: { params: { id: string }
       if (data?.publicUrl) videoUrls.push(data.publicUrl);
     }
   } else {
-    // scan folder id di bucket listing-videos
     const scan = await listPublicUrls("listing-videos", params.id);
     if (scan.length) videoUrls = scan;
   }
@@ -108,11 +107,11 @@ export default async function ListingDetail({ params }: { params: { id: string }
     <main style={{ maxWidth: 1100, margin: "40px auto", padding: "0 16px" }}>
       <p><Link href="/listings">← Kembali ke Listings</Link></p>
 
-      {/* Media slider */}
+      {/* Slider media (client component) */}
       <MediaViewer media={media} title={listing.title || "Unit"} />
 
       <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12 }}>Foto &amp; Video Unit</h3>
-      {/* Thumbnail bar */}
+      {/* Bar thumbnail */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         {media.map((m, i) => (
           <div key={i} style={{ width: 78, height: 78, borderRadius: 8, overflow: "hidden", border: "1px solid #e5e7eb" }}>
@@ -155,111 +154,5 @@ export default async function ListingDetail({ params }: { params: { id: string }
   );
 }
 
-/* -------------------- Client media viewer -------------------- */
-"use client";
-import { useEffect, useRef, useState } from "react";
-
-function MediaViewer({ media, title }: { media: MediaItem[]; title: string }) {
-  const [idx, setIdx] = useState(0);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const startX = useRef<number | null>(null);
-
-  const current = media[idx];
-
-  // swipe (touch)
-  useEffect(() => {
-    const el = wrapRef.current;
-    if (!el) return;
-    const onStart = (e: TouchEvent) => (startX.current = e.touches[0].clientX);
-    const onMove = (e: TouchEvent) => {
-      if (startX.current == null) return;
-      const dx = e.touches[0].clientX - startX.current;
-      if (Math.abs(dx) > 60) {
-        if (dx < 0) setIdx((v) => Math.min(v + 1, media.length - 1));
-        else setIdx((v) => Math.max(v - 1, 0));
-        startX.current = null;
-      }
-    };
-    const onEnd = () => (startX.current = null);
-    el.addEventListener("touchstart", onStart, { passive: true });
-    el.addEventListener("touchmove", onMove, { passive: true });
-    el.addEventListener("touchend", onEnd, { passive: true });
-    return () => {
-      el.removeEventListener("touchstart", onStart);
-      el.removeEventListener("touchmove", onMove);
-      el.removeEventListener("touchend", onEnd);
-    };
-  }, [media.length]);
-
-  return (
-    <div ref={wrapRef} style={{ position: "relative", width: "100%", borderRadius: 12, overflow: "hidden", background: "#000" }}>
-      {/* panah kiri */}
-      {idx > 0 && (
-        <button
-          onClick={() => setIdx((v) => Math.max(v - 1, 0))}
-          style={{
-            position: "absolute",
-            left: 8,
-            top: "50%",
-            transform: "translateY(-50%)",
-            zIndex: 10,
-            background: "rgba(0,0,0,0.45)",
-            color: "#fff",
-            border: "none",
-            width: 40,
-            height: 40,
-            borderRadius: 999,
-          }}
-          aria-label="Sebelumnya"
-        >
-          ‹
-        </button>
-      )}
-
-      {/* panah kanan */}
-      {idx < media.length - 1 && (
-        <button
-          onClick={() => setIdx((v) => Math.min(v + 1, media.length - 1))}
-          style={{
-            position: "absolute",
-            right: 8,
-            top: "50%",
-            transform: "translateY(-50%)",
-            zIndex: 10,
-            background: "rgba(0,0,0,0.45)",
-            color: "#fff",
-            border: "none",
-            width: 40,
-            height: 40,
-            borderRadius: 999,
-          }}
-          aria-label="Berikutnya"
-        >
-          ›
-        </button>
-      )}
-
-      <div style={{ width: "100%", aspectRatio: "16/9" }}>
-        {current?.kind === "video" ? (
-          <video
-            key={current.url}
-            src={current.url}
-            controls
-            playsInline
-            style={{ width: "100%", height: "100%", objectFit: "contain", background: "#000" }}
-          />
-        ) : current ? (
-          <img
-            src={current.url}
-            alt={title}
-            style={{ width: "100%", height: "100%", objectFit: "contain", background: "#000" }}
-          />
-        ) : (
-          <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", color: "#9ca3af", background: "#111827" }}>
-            Tidak ada media
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+// IMPORT SETELAH EXPORT DEFAULT, TETAP SERVER (tidak ada "use client" di file ini)
+import MediaViewer from "./MediaViewer";
