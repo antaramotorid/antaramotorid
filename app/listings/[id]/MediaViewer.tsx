@@ -1,276 +1,164 @@
-"use client";
+// app/listings/[id]/page.tsx
+import Link from "next/link";
+import { supabase } from "../../../lib/supabaseClient";
+import MediaViewer, { MediaItem } from "./MediaViewer";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-
-export type MediaItem =
-  | { type: "image"; url: string }
-  | { type: "video"; url: string; thumb?: string };
-
-function guessMime(url: string): string | undefined {
-  const ext = (url.split("?")[0].split(".").pop() || "").toLowerCase();
-  switch (ext) {
-    case "mp4":
-      return "video/mp4";
-    case "mov":
-      // banyak MOV dari iPhone: jika H.264 akan jalan; jika HEVC mungkin gagal (ditangani onError)
-      return "video/quicktime";
-    case "m4v":
-      return "video/x-m4v";
-    case "webm":
-      return "video/webm";
-    case "3gp":
-      return "video/3gpp";
-    default:
-      return undefined;
-  }
+// ——— utils ———
+function normalizeWa(n: any): string | null {
+  if (!n) return null;
+  const digits = String(n).replace(/[^0-9]/g, "");
+  if (!digits) return null;
+  if (digits.startsWith("0")) return "62" + digits.slice(1);
+  if (digits.startsWith("62")) return digits;
+  return digits;
 }
 
-export default function MediaViewer({
-  media,
-  title,
+export default async function ListingDetail({
+  params,
 }: {
-  media: MediaItem[];
-  title: string;
+  params: { id: string };
 }) {
-  const [idx, setIdx] = useState(0);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const current = media[idx];
+  // 1) Ambil data listing
+  const { data: listing } = await supabase
+    .from("listings")
+    .select("*")
+    .eq("id", params.id)
+    .single();
 
-  // bisa swipe/drag di HP
-  const startX = useRef<number | null>(null);
-  const onTouchStart = (e: React.TouchEvent) => {
-    startX.current = e.touches[0].clientX;
-  };
-  const onTouchEnd = (e: React.TouchEvent) => {
-    if (startX.current == null) return;
-    const delta = e.changedTouches[0].clientX - startX.current;
-    if (Math.abs(delta) > 40) {
-      if (delta < 0) next();
-      else prev();
-    }
-    startX.current = null;
-  };
-
-  function prev() {
-    setIdx((i) => (i - 1 + media.length) % media.length);
-  }
-  function next() {
-    setIdx((i) => (i + 1) % media.length);
+  if (!listing) {
+    return (
+      <main style={{ maxWidth: 960, margin: "40px auto", padding: "0 16px" }}>
+        <h1>Listing tidak ditemukan</h1>
+        <p>
+          <Link href="/listings">← Kembali</Link>
+        </p>
+      </main>
+    );
   }
 
-  // jika slide berubah, jeda video
-  useEffect(() => {
-    if (videoRef.current) {
-      try {
-        videoRef.current.pause();
-        videoRef.current.currentTime = 0;
-      } catch {}
+  // 2) Kumpulkan FOTO dari bucket mana pun yang tersedia
+  const imageBuckets = ["Listing_image", "listing-images", "listing_images"];
+  const imageUrls: string[] = [];
+  for (const bucket of imageBuckets) {
+    const { data: files, error } = await supabase.storage
+      .from(bucket)
+      .list(params.id, { limit: 50 });
+    if (error) continue;
+    if (!files?.length) continue;
+    for (const f of files) {
+      const { data } = supabase.storage
+        .from(bucket)
+        .getPublicUrl(`${params.id}/${f.name}`);
+      if (data?.publicUrl) imageUrls.push(data.publicUrl);
     }
-  }, [idx]);
+    if (imageUrls.length) break; // stop di bucket pertama yang punya isi
+  }
 
-  const thumbStrip = useMemo(() => {
-    // tampilkan max 8 thumb supaya ringan
-    return media.slice(0, 8);
-  }, [media]);
+  // 3) Kumpulkan VIDEO (mp4/webm/mov/m4v) dari bucket video
+  const videoBuckets = ["listing-videos", "Listing_videos", "listing_videos"];
+  const videoUrls: string[] = [];
+  for (const bucket of videoBuckets) {
+    const { data: files, error } = await supabase.storage
+      .from(bucket)
+      .list(params.id, { limit: 20 });
+    if (error) continue;
+    if (!files?.length) continue;
 
+    for (const f of files) {
+      const ext = f.name.split(".").pop()?.toLowerCase() || "";
+      // filter ekstensi umum
+      if (!["mp4", "webm", "mov", "m4v"].includes(ext)) continue;
+
+      const { data } = supabase.storage
+        .from(bucket)
+        .getPublicUrl(`${params.id}/${f.name}`);
+      if (data?.publicUrl) videoUrls.push(data.publicUrl);
+    }
+    if (videoUrls.length) break;
+  }
+
+  // 4) Susun media: VIDEO dulu, baru FOTO
+  const media: MediaItem[] = [
+    ...videoUrls.map((url) => ({ type: "video" as const, url })),
+    ...imageUrls.map((url) => ({ type: "image" as const, url })),
+  ];
+
+  // 5) Util tampilan & WA
+  const rp = (n: any) =>
+    typeof n === "number"
+      ? new Intl.NumberFormat("id-ID", {
+          style: "currency",
+          currency: "IDR",
+          maximumFractionDigits: 0,
+        }).format(n)
+      : "—";
+
+  const phoneRaw =
+    (listing as any).whatsapp || (listing as any).contact_whatsapp || null;
+  const wa = normalizeWa(phoneRaw);
+
+  // 6) Render
   return (
-    <section>
-      {/* AREA MEDIA */}
+    <main style={{ maxWidth: 1100, margin: "40px auto", padding: "0 16px" }}>
+      <p>
+        <Link href="/listings">← Kembali ke Listings</Link>
+      </p>
+
+      {/* Slider foto & video (video tampil pertama bila ada) */}
+      <MediaViewer media={media} title={listing.title || "Unit"} />
+
+      <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12 }}>
+        Foto &amp; Video Unit
+      </h3>
+
+      {/* Info */}
       <div
         style={{
-          position: "relative",
-          borderRadius: 12,
-          overflow: "hidden",
-          background: "#f3f4f6",
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          marginTop: 18,
+          flexWrap: "wrap",
         }}
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
       >
-        {/* tombol panah kiri/kanan */}
-        {media.length > 1 && (
-          <>
-            <button
-              aria-label="Sebelumnya"
-              onClick={prev}
-              style={{
-                position: "absolute",
-                left: 8,
-                top: "50%",
-                transform: "translateY(-50%)",
-                background: "rgba(0,0,0,0.5)",
-                border: "none",
-                color: "#fff",
-                width: 36,
-                height: 36,
-                borderRadius: 999,
-                cursor: "pointer",
-                zIndex: 2,
-              }}
-            >
-              ‹
-            </button>
-            <button
-              aria-label="Berikutnya"
-              onClick={next}
-              style={{
-                position: "absolute",
-                right: 8,
-                top: "50%",
-                transform: "translateY(-50%)",
-                background: "rgba(0,0,0,0.5)",
-                border: "none",
-                color: "#fff",
-                width: 36,
-                height: 36,
-                borderRadius: 999,
-                cursor: "pointer",
-                zIndex: 2,
-              }}
-            >
-              ›
-            </button>
-          </>
+        <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0 }}>
+          {listing.title}
+        </h1>
+        {wa && (
+          <a
+            href={`https://wa.me/${wa}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              padding: "10px 14px",
+              border: "1px solid #10b981",
+              borderRadius: 10,
+            }}
+          >
+            Chat via WhatsApp
+          </a>
         )}
-
-        {/* konten */}
-        <div style={{ width: "100%", maxHeight: 520 }}>
-          {current?.type === "image" ? (
-            <img
-              key={current.url}
-              src={current.url}
-              alt={title}
-              style={{
-                width: "100%",
-                height: "auto",
-                objectFit: "cover",
-                display: "block",
-              }}
-              loading="eager"
-            />
-          ) : current ? (
-            <VideoBox url={current.url} title={title} videoRef={videoRef} />
-          ) : null}
-        </div>
       </div>
 
-      {/* THUMB STRIP */}
-      {thumbStrip.length > 1 && (
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            marginTop: 10,
-            overflowX: "auto",
-            paddingBottom: 4,
-          }}
-        >
-          {thumbStrip.map((m, i) => (
-            <button
-              key={i + m.url}
-              onClick={() => setIdx(i)}
-              title={m.type === "video" ? "Video" : "Foto"}
-              style={{
-                border:
-                  i === idx ? "2px solid #2563eb" : "1px solid #e5e7eb",
-                borderRadius: 8,
-                padding: 0,
-                background: "#fff",
-                cursor: "pointer",
-              }}
-            >
-              {m.type === "image" ? (
-                <img
-                  src={m.url}
-                  alt={title}
-                  style={{ width: 80, height: 64, objectFit: "cover" }}
-                  loading="lazy"
-                />
-              ) : (
-                <div
-                  style={{
-                    width: 80,
-                    height: 64,
-                    display: "grid",
-                    placeItems: "center",
-                    background: "#0f172a",
-                    color: "#fff",
-                    fontSize: 12,
-                  }}
-                >
-                  ▶ Video
-                </div>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
+      <p style={{ color: "#6b7280", marginTop: 6 }}>
+        {listing.brand || "—"} • {listing.year ?? "—"}{" "}
+        {listing.location ? `• ${listing.location}` : ""}
+      </p>
+      <p style={{ fontSize: 22, fontWeight: 800, marginTop: 10 }}>
+        {rp(listing.price)}
+      </p>
 
-function VideoBox({
-  url,
-  title,
-  videoRef,
-}: {
-  url: string;
-  title: string;
-  videoRef: React.MutableRefObject<HTMLVideoElement | null>;
-}) {
-  const [failed, setFailed] = useState(false);
-  const mime = guessMime(url);
-
-  return (
-    <div style={{ position: "relative", background: "#000" }}>
-      {!failed ? (
-        <video
-          key={url}
-          ref={videoRef}
-          controls
-          playsInline
-          preload="metadata"
-          style={{ width: "100%", maxHeight: 520, display: "block" }}
-          onError={() => setFailed(true)}
-        >
-          <source src={url} {...(mime ? { type: mime } : {})} />
-          {/* fallback text */}
-          Browser Anda tidak mendukung pemutar video HTML5.
-        </video>
-      ) : (
-        <div
-          style={{
-            color: "#fff",
-            background: "#111827",
-            padding: 16,
-            height: 260,
-            display: "grid",
-            placeItems: "center",
-            textAlign: "center",
-          }}
-        >
-          <div>
-            <p style={{ marginBottom: 8 }}>
-              Video tidak dapat diputar di browser (kemungkinan codec HEVC/HEIC).
-            </p>
-            <a
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                color: "#60a5fa",
-                textDecoration: "underline",
-                fontWeight: 600,
-              }}
-            >
-              Unduh / buka langsung file video
-            </a>
-            <p style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>
-              Disarankan unggah MP4 (H.264) atau WebM agar tampil di semua
-              browser.
-            </p>
-          </div>
-        </div>
+      {listing.description && (
+        <>
+          <h3 style={{ fontSize: 18, fontWeight: 700, marginTop: 18 }}>
+            Deskripsi
+          </h3>
+          <p style={{ whiteSpace: "pre-wrap" }}>{listing.description}</p>
+        </>
       )}
-    </div>
+
+      {/* MAPS (tetap seperti sebelumnya jika Anda sudah menambahkannya).
+          Bila Anda sudah punya komponen Maps terpisah, sisipkan di sini. */}
+    </main>
   );
 }
