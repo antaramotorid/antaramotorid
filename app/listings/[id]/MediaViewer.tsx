@@ -1,226 +1,110 @@
 // app/listings/[id]/MediaViewer.tsx
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-export type MediaItem = {
-  type: "image" | "video";
-  url: string;
-  thumb?: string;
-};
+export type MediaItem = { kind: "image" | "video"; url: string; thumb?: string };
 
-export default function MediaViewer({
-  media,
-  title,
-}: {
-  media: MediaItem[];
-  title: string;
-}) {
+export default function MediaViewer({ media, title }: { media: MediaItem[]; title: string }) {
   const [idx, setIdx] = useState(0);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const startX = useRef<number | null>(null);
 
-  // jika tak ada media, tampilkan placeholder
-  if (!media?.length) {
-    return (
-      <div
-        style={{
-          width: "100%",
-          aspectRatio: "16/9",
-          background: "#f3f4f6",
-          borderRadius: 12,
-          display: "grid",
-          placeItems: "center",
-          color: "#9ca3af",
-          marginTop: 12,
-        }}
-      >
-        Tidak ada foto / video
-      </div>
-    );
-  }
+  const current = media[idx];
 
-  // gesture swipe (mobile)
+  // swipe (touch)
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
-
-    let startX = 0;
-    const onTouchStart = (e: TouchEvent) => {
-      startX = e.touches[0].clientX;
+    const onStart = (e: TouchEvent) => (startX.current = e.touches[0].clientX);
+    const onMove = (e: TouchEvent) => {
+      if (startX.current == null) return;
+      const dx = e.touches[0].clientX - startX.current;
+      if (Math.abs(dx) > 60) {
+        if (dx < 0) setIdx((v) => Math.min(v + 1, media.length - 1));
+        else setIdx((v) => Math.max(v - 1, 0));
+        startX.current = null;
+      }
     };
-    const onTouchEnd = (e: TouchEvent) => {
-      const dx = e.changedTouches[0].clientX - startX;
-      if (dx > 50) prev();
-      else if (dx < -50) next();
-    };
-
-    el.addEventListener("touchstart", onTouchStart, { passive: true });
-    el.addEventListener("touchend", onTouchEnd, { passive: true });
+    const onEnd = () => (startX.current = null);
+    el.addEventListener("touchstart", onStart, { passive: true });
+    el.addEventListener("touchmove", onMove, { passive: true });
+    el.addEventListener("touchend", onEnd, { passive: true });
     return () => {
-      el.removeEventListener("touchstart", onTouchStart);
-      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchstart", onStart);
+      el.removeEventListener("touchmove", onMove);
+      el.removeEventListener("touchend", onEnd);
     };
-  }, [idx, media.length]);
-
-  const next = () => setIdx((i) => (i + 1) % media.length);
-  const prev = () => setIdx((i) => (i - 1 + media.length) % media.length);
-
-  const cur = media[idx];
+  }, [media.length]);
 
   return (
-    <div ref={wrapRef} style={{ position: "relative", marginTop: 12 }}>
-      {/* Panah kiri/kanan */}
-      <button
-        aria-label="Sebelumnya"
-        onClick={prev}
-        style={{
-          position: "absolute",
-          left: 8,
-          top: "50%",
-          transform: "translateY(-50%)",
-          zIndex: 2,
-          background: "rgba(0,0,0,0.45)",
-          color: "#fff",
-          border: 0,
-          borderRadius: 999,
-          width: 40,
-          height: 40,
-          cursor: "pointer",
-        }}
-      >
-        ‹
-      </button>
-      <button
-        aria-label="Berikutnya"
-        onClick={next}
-        style={{
-          position: "absolute",
-          right: 8,
-          top: "50%",
-          transform: "translateY(-50%)",
-          zIndex: 2,
-          background: "rgba(0,0,0,0.45)",
-          color: "#fff",
-          border: 0,
-          borderRadius: 999,
-          width: 40,
-          height: 40,
-          cursor: "pointer",
-        }}
-      >
-        ›
-      </button>
+    <div ref={wrapRef} style={{ position: "relative", width: "100%", borderRadius: 12, overflow: "hidden", background: "#000" }}>
+      {/* panah kiri */}
+      {idx > 0 && (
+        <button
+          onClick={() => setIdx((v) => Math.max(v - 1, 0))}
+          style={{
+            position: "absolute",
+            left: 8,
+            top: "50%",
+            transform: "translateY(-50%)",
+            zIndex: 10,
+            background: "rgba(0,0,0,0.45)",
+            color: "#fff",
+            border: "none",
+            width: 40,
+            height: 40,
+            borderRadius: 999,
+          }}
+          aria-label="Sebelumnya"
+        >
+          ‹
+        </button>
+      )}
 
-      {/* Media utama */}
-      <div
-        style={{
-          width: "100%",
-          borderRadius: 12,
-          overflow: "hidden",
-          background: "#000",
-        }}
-      >
-        {cur.type === "image" ? (
-          <img
-            src={cur.url}
-            alt={title}
-            style={{
-              width: "100%",
-              maxHeight: 520,
-              objectFit: "cover",
-              display: "block",
-            }}
-          />
-        ) : (
+      {/* panah kanan */}
+      {idx < media.length - 1 && (
+        <button
+          onClick={() => setIdx((v) => Math.min(v + 1, media.length - 1))}
+          style={{
+            position: "absolute",
+            right: 8,
+            top: "50%",
+            transform: "translateY(-50%)",
+            zIndex: 10,
+            background: "rgba(0,0,0,0.45)",
+            color: "#fff",
+            border: "none",
+            width: 40,
+            height: 40,
+            borderRadius: 999,
+          }}
+          aria-label="Berikutnya"
+        >
+          ›
+        </button>
+      )}
+
+      <div style={{ width: "100%", aspectRatio: "16/9" }}>
+        {current?.kind === "video" ? (
           <video
-            key={cur.url}
-            src={cur.url}
+            key={current.url}
+            src={current.url}
             controls
             playsInline
-            style={{ width: "100%", maxHeight: 520, display: "block" }}
+            style={{ width: "100%", height: "100%", objectFit: "contain", background: "#000" }}
           />
+        ) : current ? (
+          <img
+            src={current.url}
+            alt={title}
+            style={{ width: "100%", height: "100%", objectFit: "contain", background: "#000" }}
+          />
+        ) : (
+          <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", color: "#9ca3af", background: "#111827" }}>
+            Tidak ada media
+          </div>
         )}
-      </div>
-
-      {/* Thumbnails horizontal */}
-      <div
-        style={{
-          display: "flex",
-          gap: 10,
-          marginTop: 10,
-          overflowX: "auto",
-          paddingBottom: 4,
-        }}
-      >
-        {media.map((m, i) => (
-          <button
-            key={i}
-            onClick={() => setIdx(i)}
-            style={{
-              border: i === idx ? "2px solid #2563eb" : "1px solid #e5e7eb",
-              borderRadius: 8,
-              padding: 0,
-              width: 88,
-              height: 66,
-              overflow: "hidden",
-              flex: "0 0 auto",
-              position: "relative",
-              background: "#fff",
-              cursor: "pointer",
-            }}
-            aria-label={m.type === "video" ? "Video" : "Foto"}
-            title={m.type === "video" ? "Video" : "Foto"}
-          >
-            {m.type === "image" ? (
-              <img
-                src={m.thumb || m.url}
-                alt={`${title}-${i + 1}`}
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-              />
-            ) : (
-              <>
-                <video
-                  src={m.url}
-                  muted
-                  playsInline
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
-                {/* badge play */}
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    display: "grid",
-                    placeItems: "center",
-                    pointerEvents: "none",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 22,
-                      height: 22,
-                      borderRadius: "50%",
-                      background: "rgba(0,0,0,0.55)",
-                      display: "grid",
-                      placeItems: "center",
-                    }}
-                  >
-                    <span
-                      style={{
-                        marginLeft: 2,
-                        color: "#fff",
-                        fontSize: 12,
-                        lineHeight: 1,
-                      }}
-                    >
-                      ►
-                    </span>
-                  </div>
-                </div>
-              </>
-            )}
-          </button>
-        ))}
       </div>
     </div>
   );
