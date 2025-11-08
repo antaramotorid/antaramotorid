@@ -71,8 +71,8 @@ export default async function ListingDetail({
   // Ambil media dari storage (video dulu agar tampil pertama)
   const [videos, images] = await Promise.all([getVideoUrls(id), getImageUrls(id)]);
   const media: MediaItem[] = [
-    ...videos.map((url) => ({ kind: "video" as const, url })),
-    ...images.map((url) => ({ kind: "image" as const, url })),
+    ...videos.map((url) => ({ type: "video" as const, url })),
+    ...images.map((url) => ({ type: "image" as const, url })),
   ];
 
   return (
