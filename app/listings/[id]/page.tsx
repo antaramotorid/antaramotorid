@@ -3,7 +3,7 @@ import Link from "next/link";
 import { supabase } from "../../../lib/supabaseClient";
 import dynamic from "next/dynamic";
 
-// -------- util ----------
+// ---- utils ----
 function normalizeWa(n: any): string | null {
   if (!n) return null;
   const digits = String(n).replace(/[^0-9]/g, "");
@@ -13,13 +13,9 @@ function normalizeWa(n: any): string | null {
   return digits;
 }
 
-// Client-only viewer (sudah hijau)
+// Import komponen client + TYPE yang dipakai komponen itu
 const MediaViewer = dynamic(() => import("./MediaViewer"), { ssr: false });
-
-// Type media untuk slider
-type MediaItem =
-  | { kind: "video"; url: string; thumb?: string }
-  | { kind: "image"; url: string };
+import type { MediaItem } from "./MediaViewer";
 
 export default async function ListingDetail({
   params,
@@ -80,13 +76,13 @@ export default async function ListingDetail({
     }
   }
 
-  // 4) Susun media: video dulu lalu foto (FIX tipe dengan as const)
+  // 4) Susun media: VIDEO dulu, lalu FOTO (pakai field `type` sesuai MediaViewer)
   const videoItems: MediaItem[] = videoUrls.map((url) => ({
-    kind: "video" as const,
+    type: "video" as const,
     url,
   }));
   const imageItems: MediaItem[] = imageUrls.map((url) => ({
-    kind: "image" as const,
+    type: "image" as const,
     url,
   }));
   const media: MediaItem[] = [...videoItems, ...imageItems];
@@ -108,7 +104,7 @@ export default async function ListingDetail({
     <main style={{ maxWidth: 1100, margin: "40px auto", padding: "0 16px" }}>
       <p><Link href="/listings">← Kembali ke Listings</Link></p>
 
-      {/* Slider foto & video (video tampil pertama bila ada) */}
+      {/* Slider foto & video */}
       <MediaViewer media={media} title={listing.title || "Unit"} />
 
       <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12 }}>
@@ -131,7 +127,8 @@ export default async function ListingDetail({
       </div>
 
       <p style={{ color: "#6b7280", marginTop: 6 }}>
-        {listing.brand || "—"} • {listing.year ?? "—"}{listing.location ? ` • ${listing.location}` : ""}
+        {listing.brand || "—"} • {listing.year ?? "—"}
+        {listing.location ? ` • ${listing.location}` : ""}
       </p>
       <p style={{ fontSize: 22, fontWeight: 800, marginTop: 10 }}>{rp(listing.price)}</p>
 
@@ -151,7 +148,9 @@ export default async function ListingDetail({
             style={{ width: "100%", height: 320, border: 0, borderRadius: 12, background: "#f3f4f6" }}
             loading="lazy"
             referrerPolicy="no-referrer-when-downgrade"
-            src={`https://www.google.com/maps?q=${encodeURIComponent(listing.location)}&output=embed`}
+            src={`https://www.google.com/maps?q=${encodeURIComponent(
+              listing.location
+            )}&output=embed`}
           />
         </section>
       )}
