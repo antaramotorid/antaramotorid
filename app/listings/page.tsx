@@ -5,10 +5,12 @@ import { supabase } from "../../lib/supabaseClient";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// Kandidat nama bucket gambar yang sudah dipakai di project ini
+// Kandidat bucket foto yang pernah kita pakai
 const IMAGE_BUCKETS = ["Listing_image", "listing-images", "listing_images"];
+// Bucket video yang disepakati
+const VIDEO_BUCKET = "listing-videos";
 
-/** Ambil 1 foto pertama untuk sebuah listingId dari bucket yang tersedia */
+/** Ambil 1 foto pertama untuk listingId dari bucket yang tersedia */
 async function getFirstImageFromBuckets(listingId: string): Promise<string | null> {
   for (const bucket of IMAGE_BUCKETS) {
     const { data: files, error } = await supabase.storage
@@ -20,10 +22,7 @@ async function getFirstImageFromBuckets(listingId: string): Promise<string | nul
     const first =
       files.find((f) => /\.(jpg|jpeg|png|webp|gif)$/i.test(f.name)) ?? files[0];
 
-    const { data } = supabase.storage
-      .from(bucket)
-      .getPublicUrl(`${listingId}/${first.name}`);
-
+    const { data } = supabase.storage.from(bucket).getPublicUrl(`${listingId}/${first.name}`);
     if (data?.publicUrl) return data.publicUrl;
   }
   return null;
@@ -40,7 +39,7 @@ async function getFirstImageFromTable(listingId: string): Promise<string | null>
   const row = rows?.[0];
   if (!row?.file_path) return null;
 
-  // file_path contoh: "Listing_image/07c9ad8f-.../nama.jpg"
+  // file_path contoh: "Listing_image/07c9.../nama.jpg"
   const path = String(row.file_path);
   const slash = path.indexOf("/");
   if (slash === -1) return null;
@@ -52,9 +51,33 @@ async function getFirstImageFromTable(listingId: string): Promise<string | null>
   return data?.publicUrl ?? null;
 }
 
-/** Wrapper: coba dari bucket dulu, kalau tidak ada pakai tabel */
-async function getFirstImageUrl(listingId: string): Promise<string | null> {
-  return (await getFirstImageFromBuckets(listingId)) ?? (await getFirstImageFromTable(listingId));
+/** Jika tidak ada foto, coba ambil 1 video agar kartu tetap punya pratinjau */
+async function getFirstVideoUrl(listingId: string): Promise<string | null> {
+  const { data: files, error } = await supabase.storage
+    .from(VIDEO_BUCKET)
+    .list(listingId, { limit: 50, sortBy: { column: "name", order: "asc" } });
+  if (error || !files || files.length === 0) return null;
+
+  const first =
+    files.find((f) => /\.(mp4|webm|mov|m4v)$/i.test(f.name)) ?? files[0];
+
+  const { data } = supabase.storage
+    .from(VIDEO_BUCKET)
+    .getPublicUrl(`${listingId}/${first.name}`);
+  return data?.publicUrl ?? null;
+}
+
+/** Wrapper: coba foto dari bucket → tabel; kalau tidak ada, pakai video */
+async function getPreviewUrl(listingId: string): Promise<{ type: "image" | "video"; url: string } | null> {
+  const img =
+    (await getFirstImageFromBuckets(listingId)) ??
+    (await getFirstImageFromTable(listingId));
+  if (img) return { type: "image", url: img };
+
+  const vid = await getFirstVideoUrl(listingId);
+  if (vid) return { type: "video", url: vid };
+
+  return null;
 }
 
 type ListingRow = {
@@ -76,14 +99,14 @@ export default async function ListingsPage() {
 
   const rows: ListingRow[] = listings ?? [];
 
-  // Ambil thumbnail untuk masing-masing listing (server-side)
-  const thumbs = await Promise.all(
+  // Ambil preview (foto lebih dulu, jika kosong pakai video)
+  const previews = await Promise.all(
     rows.map(async (row) => ({
       id: row.id,
-      url: await getFirstImageUrl(row.id),
+      preview: await getPreviewUrl(row.id),
     }))
   );
-  const thumbMap = new Map(thumbs.map((t) => [t.id, t.url]));
+  const previewMap = new Map(previews.map((p) => [p.id, p.preview]));
 
   const toIDR = (n: number | null) =>
     typeof n === "number"
@@ -113,7 +136,7 @@ export default async function ListingsPage() {
         }}
       >
         {rows.map((l) => {
-          const img = thumbMap.get(l.id) || null;
+          const pv = previewMap.get(l.id) || null;
           return (
             <li
               key={l.id}
@@ -128,19 +151,24 @@ export default async function ListingsPage() {
                 href={`/listings/${l.id}`}
                 style={{ display: "block", textDecoration: "none", color: "inherit" }}
               >
-                {/* Thumbnail */}
-                {img ? (
-                  <img
-                    src={img}
-                    alt={l.title ?? "foto unit"}
-                    style={{
-                      width: "100%",
-                      height: 150,
-                      objectFit: "cover",
-                      display: "block",
-                    }}
-                    loading="lazy"
-                  />
+                {/* Thumbnail: foto prioritas, jika tidak ada tampilkan video muted */}
+                {pv ? (
+                  pv.type === "image" ? (
+                    <img
+                      src={pv.url}
+                      alt={l.title ?? "foto unit"}
+                      style={{ width: "100%", height: 150, objectFit: "cover", display: "block" }}
+                      loading="lazy"
+                    />
+                  ) : (
+                    <video
+                      src={pv.url}
+                      muted
+                      playsInline
+                      preload="metadata"
+                      style={{ width: "100%", height: 150, objectFit: "cover", display: "block", background: "#000" }}
+                    />
+                  )
                 ) : (
                   <div
                     style={{
