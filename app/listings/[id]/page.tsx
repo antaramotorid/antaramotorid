@@ -44,7 +44,7 @@ export default async function ListingDetail({
     );
   }
 
-  // 2) FOTO — PRIORITAS BARU: listing-images, sisa jadi fallback
+  // 2) FOTO — PRIORITAS: listing-images (hyphen), sisanya fallback
   const imageUrls: string[] = [];
   const candidateBuckets = ["listing-images", "Listing_image", "listing_images"];
 
@@ -64,7 +64,7 @@ export default async function ListingDetail({
     if (imageUrls.length) break; // stop di bucket pertama yang punya isi
   }
 
-  // 3) VIDEO (bucket tetap)
+  // 3) VIDEO (bucket tetap: listing-videos)
   const videoUrls: string[] = [];
   {
     const bucket = "listing-videos";
@@ -80,10 +80,10 @@ export default async function ListingDetail({
     }
   }
 
-  // 4) Susun media (video dulu, lalu foto) — tipe konsisten dengan MediaViewer { kind: "video"|"image" }
+  // 4) Susun media untuk MediaViewer (video dulu, lalu foto) — gunakan `type`
   const media: MediaItem[] = [
-    ...videoUrls.map((url) => ({ kind: "video" as const, url })),
-    ...imageUrls.map((url) => ({ kind: "image" as const, url })),
+    ...videoUrls.map((url) => ({ type: "video" as const, url })),
+    ...imageUrls.map((url) => ({ type: "image" as const, url })),
   ];
 
   const phoneRaw =
