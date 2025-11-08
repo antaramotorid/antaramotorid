@@ -2,6 +2,9 @@
 import Link from "next/link";
 import { supabase } from "../../lib/supabaseClient";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 // Kandidat nama bucket gambar yang sudah dipakai di project ini
 const IMAGE_BUCKETS = ["Listing_image", "listing-images", "listing_images"];
 
