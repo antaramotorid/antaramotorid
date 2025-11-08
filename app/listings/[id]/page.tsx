@@ -3,8 +3,9 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { supabase } from "../../../lib/supabaseClient";
 
-// MediaViewer client (versi hijau yang kamu pakai sekarang)
+// MediaViewer client
 const MediaViewer = dynamic(() => import("./MediaViewer"), { ssr: false });
+import type { MediaItem } from "./MediaViewer";
 
 const IMAGE_BUCKETS = [
   "Listing_image",
@@ -25,25 +26,34 @@ function normalizeWa(n: any): string | null {
 }
 
 async function listImages(id: string): Promise<string[]> {
+  // Cari dari beberapa bucket gambar
   for (const bucket of IMAGE_BUCKETS) {
     const { data: files, error } = await supabase.storage
       .from(bucket)
       .list(id, { limit: 100, sortBy: { column: "name", order: "asc" } });
+
     if (error || !files || files.length === 0) continue;
 
-    const imgs = files
-      .filter((f) => /\.(jpe?g|png|webp|gif)$/i.test(f.name))
-      .map((f) => supabase.storage.from(bucket).getPublicUrl(`${id}/${f.name}`).data.publicUrl)
-      .filter(Boolean) as string[];
+    const urls =
+      files
+        .filter((f) => /\.(jpe?g|png|webp|gif)$/i.test(f.name))
+        .map(
+          (f) =>
+            supabase.storage.from(bucket).getPublicUrl(`${id}/${f.name}`).data
+              .publicUrl
+        )
+        .filter(Boolean) ?? [];
 
-    if (imgs.length) return imgs;
+    if (urls.length) return urls as string[];
   }
-  // fallback dari tabel listing_images
+
+  // Fallback dari tabel listing_images (kalau ada)
   const { data: rows } = await supabase
     .from("listing_images")
     .select("file_path")
     .eq("listing_id", id);
-  const urls: string[] = [];
+
+  const fallback: string[] = [];
   for (const r of rows ?? []) {
     const path = String(r.file_path);
     const slash = path.indexOf("/");
@@ -51,24 +61,34 @@ async function listImages(id: string): Promise<string[]> {
     const bucket = path.slice(0, slash);
     const objectPath = path.slice(slash + 1);
     const { data } = supabase.storage.from(bucket).getPublicUrl(objectPath);
-    if (data?.publicUrl) urls.push(data.publicUrl);
+    if (data?.publicUrl) fallback.push(data.publicUrl);
   }
-  return urls;
+  return fallback;
 }
 
 async function listVideos(id: string): Promise<string[]> {
   const { data: files } = await supabase.storage
     .from(VIDEO_BUCKET)
     .list(id, { limit: 50, sortBy: { column: "name", order: "asc" } });
+
   return (
     files
       ?.filter((f) => /\.(mp4|webm|mov|m4v)$/i.test(f.name))
-      .map((f) => supabase.storage.from(VIDEO_BUCKET).getPublicUrl(`${id}/${f.name}`).data.publicUrl)
+      .map(
+        (f) =>
+          supabase.storage.from(VIDEO_BUCKET).getPublicUrl(`${id}/${f.name}`)
+            .data.publicUrl
+      )
       .filter(Boolean) ?? []
-  );
+  ) as string[];
 }
 
-export default async function ListingDetail({ params }: { params: { id: string } }) {
+export default async function ListingDetail({
+  params,
+}: {
+  params: { id: string };
+}) {
+  // Data listing
   const { data: listing } = await supabase
     .from("listings")
     .select("*")
@@ -86,21 +106,27 @@ export default async function ListingDetail({ params }: { params: { id: string }
     );
   }
 
+  // Media: video dulu, lalu foto (PAKAI `type` agar match MediaViewer)
   const imageUrls = await listImages(params.id);
   const videoUrls = await listVideos(params.id);
 
-  // Susun: video dulu bila ada, lalu foto
-  const media = [
-    ...videoUrls.map((url) => ({ kind: "video" as const, url })),
-    ...imageUrls.map((url) => ({ kind: "image" as const, url })),
+  const media: MediaItem[] = [
+    ...videoUrls.map((url) => ({ type: "video", url } as MediaItem)),
+    ...imageUrls.map((url) => ({ type: "image", url } as MediaItem)),
   ];
 
+  // Util tampilan
   const rp = (n: any) =>
     typeof n === "number"
-      ? new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n)
+      ? new Intl.NumberFormat("id-ID", {
+          style: "currency",
+          currency: "IDR",
+          maximumFractionDigits: 0,
+        }).format(n)
       : "—";
 
-  const phoneRaw = (listing as any).whatsapp || (listing as any).contact_whatsapp || null;
+  const phoneRaw =
+    (listing as any).whatsapp || (listing as any).contact_whatsapp || null;
   const wa = normalizeWa(phoneRaw);
 
   return (
@@ -109,16 +135,32 @@ export default async function ListingDetail({ params }: { params: { id: string }
         <Link href="/listings">← Kembali ke Listings</Link>
       </p>
 
+      {/* Slider foto & video */}
       <MediaViewer media={media} title={listing.title || "Unit"} />
 
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 18, flexWrap: "wrap" }}>
-        <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0 }}>{listing.title}</h1>
+      {/* Info ringkas */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          marginTop: 18,
+          flexWrap: "wrap",
+        }}
+      >
+        <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0 }}>
+          {listing.title}
+        </h1>
         {wa && (
           <a
             href={`https://wa.me/${wa}`}
             target="_blank"
             rel="noopener noreferrer"
-            style={{ padding: "10px 14px", border: "1px solid #10b981", borderRadius: 10 }}
+            style={{
+              padding: "10px 14px",
+              border: "1px solid #10b981",
+              borderRadius: 10,
+            }}
           >
             Chat via WhatsApp
           </a>
@@ -126,13 +168,18 @@ export default async function ListingDetail({ params }: { params: { id: string }
       </div>
 
       <p style={{ color: "#6b7280", marginTop: 6 }}>
-        {listing.brand || "—"} • {listing.year ?? "—"} {listing.location ? `• ${listing.location}` : ""}
+        {listing.brand || "—"} • {listing.year ?? "—"}{" "}
+        {listing.location ? `• ${listing.location}` : ""}
       </p>
-      <p style={{ fontSize: 22, fontWeight: 800, marginTop: 10 }}>{rp(listing.price)}</p>
+      <p style={{ fontSize: 22, fontWeight: 800, marginTop: 10 }}>
+        {rp(listing.price)}
+      </p>
 
       {listing.description && (
         <>
-          <h3 style={{ fontSize: 18, fontWeight: 700, marginTop: 18 }}>Deskripsi</h3>
+          <h3 style={{ fontSize: 18, fontWeight: 700, marginTop: 18 }}>
+            Deskripsi
+          </h3>
           <p style={{ whiteSpace: "pre-wrap" }}>{listing.description}</p>
         </>
       )}
