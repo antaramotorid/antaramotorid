@@ -1,267 +1,349 @@
 // app/sell/page.tsx
-'use client';
+"use client";
 
-import { useState, ChangeEvent, FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
-import { supabase } from '../../lib/supabaseClient';
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "../../lib/supabaseClient";
 
 type FormState = {
   title: string;
   brand: string;
-  year: string;
-  price: string;
+  year: string;        // keep string, cast saat submit
+  price: string;       // keep string, cast saat submit
   location: string;
   description: string;
   whatsapp: string;
 };
 
+function normalizeWa(n: string) {
+  const digits = String(n || "").replace(/[^0-9]/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("0")) return "62" + digits.slice(1);
+  if (digits.startsWith("62")) return digits;
+  return digits;
+}
+
 export default function SellPage() {
   const router = useRouter();
 
   const [form, setForm] = useState<FormState>({
-    title: '',
-    brand: '',
-    year: '',
-    price: '',
-    location: '',
-    description: '',
-    whatsapp: '',
+    title: "",
+    brand: "",
+    year: "",
+    price: "",
+    location: "",
+    description: "",
+    whatsapp: "",
   });
 
-  const [files, setFiles] = useState<File[]>([]);
+  const [images, setImages] = useState<File[]>([]);
+  const [video, setVideo] = useState<File | null>(null);
+
+  const [errors, setErrors] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const [progress, setProgress] = useState<string>('');
+  const [progressText, setProgressText] = useState<string>("");
 
-  function onChange(
-    e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
-  ) {
-    const { name, value } = e.target;
-    setForm((s) => ({ ...s, [name]: value }));
+  // preview
+  const imagePreviews = useMemo(
+    () => images.map((f) => URL.createObjectURL(f)),
+    [images]
+  );
+  useEffect(() => {
+    return () => imagePreviews.forEach((u) => URL.revokeObjectURL(u));
+  }, [imagePreviews]);
+
+  // cek durasi video (≤ 180 s)
+  const [videoInfo, setVideoInfo] = useState<{ duration: number } | null>(null);
+  const videoProbeRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    setVideoInfo(null);
+    if (!video) return;
+    const url = URL.createObjectURL(video);
+    const vid = document.createElement("video");
+    videoProbeRef.current = vid;
+    vid.preload = "metadata";
+    vid.onloadedmetadata = () => {
+      URL.revokeObjectURL(url);
+      const dur = vid.duration || 0;
+      setVideoInfo({ duration: Math.round(dur) });
+    };
+    vid.src = url;
+  }, [video]);
+
+  function onPickImages(files: FileList | null) {
+    if (!files) return;
+    const arr = Array.from(files).filter((f) =>
+      /^image\//.test(f.type)
+    );
+    const merged = [...images, ...arr].slice(0, 6);
+    setImages(merged);
   }
 
-  function onPickFiles(e: ChangeEvent<HTMLInputElement>) {
-    const f = Array.from(e.target.files || []);
-    // batasi maksimal 6 file
-    const selected = f.slice(0, 6);
-    setFiles(selected);
-  }
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!form.title || !form.brand || !form.year || !form.price) {
-      alert('Judul, Merek, Tahun, dan Harga wajib diisi.');
+  function onPickVideo(files: FileList | null) {
+    if (!files || !files[0]) {
+      setVideo(null);
+      setVideoInfo(null);
       return;
     }
-    if (files.length === 0) {
-      if (!confirm('Belum pilih foto. Lanjut tanpa foto?')) return;
+    const f = files[0];
+    if (!/^video\/(mp4|webm|quicktime|x-m4v)/.test(f.type)) {
+      setErrors(["Tipe video harus mp4/webm/mov/m4v"]);
+      return;
     }
-    setSubmitting(true);
-    setProgress('Menyimpan listing...');
+    setVideo(f);
+  }
 
-    // 1) Insert ke tabel listings
-    const { data: inserted, error: insertErr } = await supabase
-      .from('listings')
-      .insert([
-        {
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setErrors([]);
+    setProgressText("");
+
+    // Validasi dasar
+    const errs: string[] = [];
+    if (!form.title.trim()) errs.push("Judul wajib diisi");
+    if (!form.brand.trim()) errs.push("Merek wajib diisi");
+    const yearNum = form.year ? Number(form.year) : NaN;
+    if (form.year && (isNaN(yearNum) || yearNum < 1950 || yearNum > 2100)) {
+      errs.push("Tahun tidak valid");
+    }
+    const priceNum = form.price ? Number(form.price) : NaN;
+    if (form.price && (isNaN(priceNum) || priceNum < 0)) {
+      errs.push("Harga tidak valid");
+    }
+    if (!images.length && !video) {
+      errs.push("Minimal upload satu foto atau satu video");
+    }
+    if (videoInfo && videoInfo.duration > 180) {
+      errs.push("Durasi video maksimal 3 menit");
+    }
+    if (errs.length) {
+      setErrors(errs);
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+
+      // 1) Insert listing, dapatkan id
+      setProgressText("Menyimpan data listing…");
+      const { data: created, error: insErr } = await supabase
+        .from("listings")
+        .insert({
           title: form.title.trim(),
           brand: form.brand.trim(),
           year: form.year ? Number(form.year) : null,
           price: form.price ? Number(form.price) : null,
-          location: form.location.trim() || null,
-          description: form.description.trim() || null,
-          whatsapp: form.whatsapp.trim() || null,
-        },
-      ])
-      .select('id')
-      .single();
+          location: form.location || null,
+          description: form.description || null,
+          whatsapp: normalizeWa(form.whatsapp) || null,
+        })
+        .select()
+        .single();
 
-    if (insertErr || !inserted?.id) {
-      alert(insertErr?.message || 'Gagal menyimpan listing');
-      setSubmitting(false);
-      return;
-    }
+      if (insErr || !created) {
+        throw new Error(insErr?.message || "Gagal membuat listing");
+      }
 
-    const listingId = inserted.id as string;
+      const listingId: string = created.id;
 
-    // 2) Upload semua file (jika ada)
-    if (files.length > 0) {
-      let idx = 0;
-      for (const file of files) {
-        idx++;
-        setProgress(`Mengunggah foto ${idx}/${files.length}...`);
-
-        // nama file aman: timestamp-index-originalName tanpa spasi
-        const safeName = `${Date.now()}-${idx}-${file.name}`
-          .replace(/\s+/g, '-')
-          .toLowerCase();
-
-        // path di bucket: {listingId}/{safeName}
-        const path = `${listingId}/${safeName}`;
-
-        const { error: upErr } = await supabase
-          .storage
-          .from('listing-images')
-          .upload(path, file, { upsert: false });
-
-        if (upErr) {
-          alert(`Upload gagal untuk ${file.name}: ${upErr.message}`);
-          // lanjut ke file berikutnya; tidak batalkan seluruh proses
-          continue;
-        }
-
-        // 3) Catat ke tabel listing_images
-        const { error: imgErr } = await supabase
-          .from('listing_images')
-          .insert([{ listing_id: listingId, file_path: path }]);
-
-        if (imgErr) {
-          alert(`Gagal mencatat gambar ${file.name}: ${imgErr.message}`);
-          // lanjut ke file berikutnya
+      // 2) Upload FOTO (bucket listing-images/<id>/filename)
+      if (images.length) {
+        let idx = 0;
+        for (const img of images) {
+          idx += 1;
+          setProgressText(`Upload foto ${idx}/${images.length}…`);
+          const fileName = `${Date.now()}-${idx}-${img.name}`.replace(/\s+/g, "_");
+          const path = `${listingId}/${fileName}`;
+          const { error: upErr } = await supabase
+            .storage
+            .from("listing-images")
+            .upload(path, img, { upsert: true, contentType: img.type });
+          if (upErr) throw new Error(`Gagal upload foto: ${upErr.message}`);
         }
       }
-    }
 
-    setProgress('Selesai. Mengarahkan ke halaman detail...');
-    router.push(`/listings/${listingId}`);
+      // 3) Upload VIDEO (opsional) ke listing-videos-pending
+      if (video) {
+        setProgressText("Upload video…");
+        const vName = `${Date.now()}-video-${video.name}`.replace(/\s+/g, "_");
+        const vPath = `${listingId}/${vName}`;
+        const { error: vErr } = await supabase
+          .storage
+          .from("listing-videos-pending")
+          .upload(vPath, video, { upsert: true, contentType: video.type });
+        if (vErr) throw new Error(`Gagal upload video: ${vErr.message}`);
+      }
+
+      setProgressText("Selesai. Mengarahkan ke halaman detail…");
+      router.push(`/listings/${listingId}`);
+    } catch (err: any) {
+      setErrors([err?.message || "Terjadi kesalahan"]);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
-    <main style={{ maxWidth: 820, margin: '32px auto', padding: '0 16px' }}>
-      <h1 style={{ fontWeight: 800, fontSize: 28, marginBottom: 16 }}>Jual Motor</h1>
+    <main style={{ maxWidth: 900, margin: "40px auto", padding: "0 16px" }}>
+      <h1 style={{ fontSize: 28, fontWeight: 800, marginBottom: 16 }}>Jual Motor</h1>
 
-      <form onSubmit={onSubmit} style={{ display: 'grid', gap: 14 }}>
-        <label style={{ display: 'grid', gap: 6 }}>
+      {!!errors.length && (
+        <div style={{ background: "#FEF2F2", color: "#991B1B", padding: 12, borderRadius: 8, marginBottom: 16 }}>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {errors.map((e, i) => <li key={i}>{e}</li>)}
+          </ul>
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} style={{ display: "grid", gap: 14 }}>
+        {/* Judul */}
+        <label style={{ display: "grid", gap: 6 }}>
           <span>Judul Listing *</span>
           <input
-            name="title"
             value={form.title}
-            onChange={onChange}
+            onChange={(e) => setForm((s) => ({ ...s, title: e.target.value }))}
+            placeholder="Contoh: Vario 150 Istimewa"
             required
-            placeholder="Contoh: Yamaha Fazzio"
-            style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
+            style={inputStyle}
           />
         </label>
 
-        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr', alignItems: 'start' }}>
-          <label style={{ display: 'grid', gap: 6 }}>
+        {/* Merek & Tahun */}
+        <div style={{ display: "grid", gap: 12, gridTemplateColumns: "1fr 1fr" }}>
+          <label style={{ display: "grid", gap: 6 }}>
             <span>Merek *</span>
             <input
-              name="brand"
               value={form.brand}
-              onChange={onChange}
-              required
+              onChange={(e) => setForm((s) => ({ ...s, brand: e.target.value }))}
               placeholder="honda / yamaha / suzuki"
-              style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
+              required
+              style={inputStyle}
             />
           </label>
-          <label style={{ display: 'grid', gap: 6 }}>
+          <label style={{ display: "grid", gap: 6 }}>
             <span>Tahun *</span>
             <input
-              name="year"
               value={form.year}
-              onChange={onChange}
-              required
-              inputMode="numeric"
+              onChange={(e) => setForm((s) => ({ ...s, year: e.target.value }))}
               placeholder="2020"
-              style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
-            />
-          </label>
-        </div>
-
-        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr', alignItems: 'start' }}>
-          <label style={{ display: 'grid', gap: 6 }}>
-            <span>Harga (Rp) *</span>
-            <input
-              name="price"
-              value={form.price}
-              onChange={onChange}
-              required
               inputMode="numeric"
-              placeholder="19999999"
-              style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
-            />
-          </label>
-          <label style={{ display: 'grid', gap: 6 }}>
-            <span>Lokasi</span>
-            <input
-              name="location"
-              value={form.location}
-              onChange={onChange}
-              placeholder="Kota/Kabupaten"
-              style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
+              style={inputStyle}
+              required
             />
           </label>
         </div>
 
-        <label style={{ display: 'grid', gap: 6 }}>
-          <span>Deskripsi</span>
-          <textarea
-            name="description"
-            value={form.description}
-            onChange={onChange}
-            rows={4}
-            placeholder="Kondisi, pajak, KM, dll"
-            style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
+        {/* Harga */}
+        <label style={{ display: "grid", gap: 6 }}>
+          <span>Harga (Rp) *</span>
+          <input
+            value={form.price}
+            onChange={(e) => setForm((s) => ({ ...s, price: e.target.value }))}
+            placeholder="19999999"
+            inputMode="numeric"
+            style={inputStyle}
+            required
           />
         </label>
 
-        <label style={{ display: 'grid', gap: 6 }}>
+        {/* Lokasi */}
+        <label style={{ display: "grid", gap: 6 }}>
+          <span>Lokasi</span>
+          <input
+            value={form.location}
+            onChange={(e) => setForm((s) => ({ ...s, location: e.target.value }))}
+            placeholder="Jakarta Timur"
+            style={inputStyle}
+          />
+        </label>
+
+        {/* WA */}
+        <label style={{ display: "grid", gap: 6 }}>
           <span>WhatsApp (opsional)</span>
           <input
-            name="whatsapp"
             value={form.whatsapp}
-            onChange={onChange}
-            placeholder="62xxxxxxxxxxx"
-            style={{ border: '1px solid #ddd', borderRadius: 8, padding: 10 }}
+            onChange={(e) => setForm((s) => ({ ...s, whatsapp: e.target.value }))}
+            placeholder="08xxxxxxxxxx atau 62xxxxxxxxxx"
+            style={inputStyle}
           />
         </label>
 
-        <label style={{ display: 'grid', gap: 6 }}>
-          <span>Foto Unit (maks 6) — bisa pilih banyak sekaligus</span>
+        {/* Deskripsi */}
+        <label style={{ display: "grid", gap: 6 }}>
+          <span>Deskripsi</span>
+          <textarea
+            value={form.description}
+            onChange={(e) => setForm((s) => ({ ...s, description: e.target.value }))}
+            placeholder="Kondisi bagus, pajak hidup..."
+            rows={4}
+            style={{ ...inputStyle, resize: "vertical" }}
+          />
+        </label>
+
+        {/* Upload Foto */}
+        <div style={{ display: "grid", gap: 8 }}>
+          <label style={{ fontWeight: 600 }}>Foto Unit (max 6 gambar)</label>
           <input
             type="file"
             accept="image/*"
             multiple
-            onChange={onPickFiles}
+            onChange={(e) => onPickImages(e.target.files)}
           />
-          {files.length > 0 && (
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill,minmax(96px,1fr))',
-              gap: 8,
-              marginTop: 8
-            }}>
-              {files.map((f, i) => (
-                <div key={i} style={{ border: '1px solid #eee', borderRadius: 8, padding: 6 }}>
-                  <div style={{ fontSize: 12, marginBottom: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {f.name}
-                  </div>
-                  <img
-                    src={URL.createObjectURL(f)}
-                    alt={f.name}
-                    style={{ width: '100%', height: 80, objectFit: 'cover', borderRadius: 6 }}
-                  />
+          {!!imagePreviews.length && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(120px,1fr))", gap: 10 }}>
+              {imagePreviews.map((src, i) => (
+                <div key={i} style={{ position: "relative" }}>
+                  <img src={src} alt={`img-${i}`} style={{ width: "100%", height: 100, objectFit: "cover", borderRadius: 8 }} />
                 </div>
               ))}
             </div>
           )}
-        </label>
+        </div>
+
+        {/* Upload Video */}
+        <div style={{ display: "grid", gap: 8 }}>
+          <label style={{ fontWeight: 600 }}>Video Unit (opsional, maks 3 menit • mp4/webm/mov/m4v)</label>
+          <input
+            type="file"
+            accept="video/mp4,video/webm,video/quicktime,video/x-m4v"
+            onChange={(e) => onPickVideo(e.target.files)}
+          />
+          {video && (
+            <div style={{ fontSize: 14, color: "#374151" }}>
+              File: <b>{video.name}</b>
+              {videoInfo && (
+                <> • Durasi: {videoInfo.duration}s {videoInfo.duration > 180 ? " (terlalu panjang)" : ""}</>
+              )}
+            </div>
+          )}
+        </div>
 
         <button
           type="submit"
           disabled={submitting}
           style={{
-            background: '#2563eb',
-            color: '#fff',
-            border: 0,
+            padding: "12px 16px",
+            background: submitting ? "#9CA3AF" : "#2563EB",
+            color: "white",
             borderRadius: 10,
-            padding: '12px 14px',
-            fontWeight: 700
+            border: "none",
+            fontWeight: 700,
           }}
         >
-          {submitting ? (progress || 'Menyimpan...') : 'Simpan'}
+          {submitting ? "Mengunggah… " + (progressText || "") : "Terbitkan Listing"}
         </button>
+        {submitting && progressText && (
+          <div style={{ color: "#374151" }}>{progressText}</div>
+        )}
       </form>
     </main>
   );
 }
+
+const inputStyle: React.CSSProperties = {
+  border: "1px solid #e5e7eb",
+  borderRadius: 10,
+  padding: "10px 12px",
+  outline: "none",
+};
