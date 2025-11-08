@@ -1,111 +1,182 @@
-// app/listings/[id]/MediaViewer.tsx
 "use client";
 
 import { useEffect, useRef, useState } from "react";
 
-export type MediaItem = { kind: "image" | "video"; url: string; thumb?: string };
+export type MediaItem = { type: "image" | "video"; url: string };
 
-export default function MediaViewer({ media, title }: { media: MediaItem[]; title: string }) {
+export default function MediaViewer({
+  media,
+  title,
+}: {
+  media: MediaItem[];
+  title: string;
+}) {
   const [idx, setIdx] = useState(0);
-  const wrapRef = useRef<HTMLDivElement>(null);
   const startX = useRef<number | null>(null);
 
+  const go = (to: number) => {
+    const n = media.length;
+    if (!n) return;
+    setIdx(((to % n) + n) % n);
+  };
+
+  // swipe (mobile)
+  const onTouchStart = (e: React.TouchEvent) => {
+    startX.current = e.touches[0].clientX;
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (startX.current == null) return;
+    const dx = e.changedTouches[0].clientX - startX.current;
+    if (dx > 40) go(idx - 1);
+    if (dx < -40) go(idx + 1);
+    startX.current = null;
+  };
+
+  if (!media.length) return null;
   const current = media[idx];
 
-  // swipe (touch)
-  useEffect(() => {
-    const el = wrapRef.current;
-    if (!el) return;
-    const onStart = (e: TouchEvent) => (startX.current = e.touches[0].clientX);
-    const onMove = (e: TouchEvent) => {
-      if (startX.current == null) return;
-      const dx = e.touches[0].clientX - startX.current;
-      if (Math.abs(dx) > 60) {
-        if (dx < 0) setIdx((v) => Math.min(v + 1, media.length - 1));
-        else setIdx((v) => Math.max(v - 1, 0));
-        startX.current = null;
-      }
-    };
-    const onEnd = () => (startX.current = null);
-    el.addEventListener("touchstart", onStart, { passive: true });
-    el.addEventListener("touchmove", onMove, { passive: true });
-    el.addEventListener("touchend", onEnd, { passive: true });
-    return () => {
-      el.removeEventListener("touchstart", onStart);
-      el.removeEventListener("touchmove", onMove);
-      el.removeEventListener("touchend", onEnd);
-    };
-  }, [media.length]);
-
   return (
-    <div ref={wrapRef} style={{ position: "relative", width: "100%", borderRadius: 12, overflow: "hidden", background: "#000" }}>
-      {/* panah kiri */}
-      {idx > 0 && (
-        <button
-          onClick={() => setIdx((v) => Math.max(v - 1, 0))}
-          style={{
-            position: "absolute",
-            left: 8,
-            top: "50%",
-            transform: "translateY(-50%)",
-            zIndex: 10,
-            background: "rgba(0,0,0,0.45)",
-            color: "#fff",
-            border: "none",
-            width: 40,
-            height: 40,
-            borderRadius: 999,
-          }}
-          aria-label="Sebelumnya"
-        >
-          ‹
-        </button>
-      )}
-
-      {/* panah kanan */}
-      {idx < media.length - 1 && (
-        <button
-          onClick={() => setIdx((v) => Math.min(v + 1, media.length - 1))}
-          style={{
-            position: "absolute",
-            right: 8,
-            top: "50%",
-            transform: "translateY(-50%)",
-            zIndex: 10,
-            background: "rgba(0,0,0,0.45)",
-            color: "#fff",
-            border: "none",
-            width: 40,
-            height: 40,
-            borderRadius: 999,
-          }}
-          aria-label="Berikutnya"
-        >
-          ›
-        </button>
-      )}
-
-      <div style={{ width: "100%", aspectRatio: "16/9" }}>
-        {current?.kind === "video" ? (
+    <div style={{ width: "100%" }}>
+      {/* area utama: panah kiri/kanan + swipe */}
+      <div
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+        style={{
+          position: "relative",
+          width: "100%",
+          borderRadius: 12,
+          overflow: "hidden",
+          background: "#111",
+          display: "grid",
+          placeItems: "center",
+          minHeight: 260,
+        }}
+      >
+        {current.type === "image" ? (
+          <img
+            src={current.url}
+            alt={title || "foto"}
+            style={{ width: "100%", height: "100%", objectFit: "cover", maxHeight: 520 }}
+          />
+        ) : (
           <video
             key={current.url}
             src={current.url}
             controls
+            preload="metadata"
             playsInline
-            style={{ width: "100%", height: "100%", objectFit: "contain", background: "#000" }}
+            style={{ width: "100%", height: "100%", objectFit: "cover", maxHeight: 520, background: "#000" }}
           />
-        ) : current ? (
-          <img
-            src={current.url}
-            alt={title}
-            style={{ width: "100%", height: "100%", objectFit: "contain", background: "#000" }}
-          />
-        ) : (
-          <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", color: "#9ca3af", background: "#111827" }}>
-            Tidak ada media
-          </div>
         )}
+
+        {/* panah kiri */}
+        <button
+          aria-label="prev"
+          onClick={() => go(idx - 1)}
+          style={arrowStyle("left")}
+        >
+          ‹
+        </button>
+        {/* panah kanan */}
+        <button
+          aria-label="next"
+          onClick={() => go(idx + 1)}
+          style={arrowStyle("right")}
+        >
+          ›
+        </button>
+      </div>
+
+      {/* thumbnails: video + foto dalam SATU baris */}
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          marginTop: 10,
+          overflowX: "auto",
+          paddingBottom: 4,
+        }}
+      >
+        {media.map((m, i) => (
+          <button
+            key={m.url + i}
+            onClick={() => setIdx(i)}
+            style={{
+              width: 72,
+              height: 72,
+              borderRadius: 10,
+              overflow: "hidden",
+              border: i === idx ? "2px solid #111827" : "1px solid #e5e7eb",
+              padding: 0,
+              background: "#111",
+              position: "relative",
+              flex: "0 0 auto",
+              cursor: "pointer",
+            }}
+            aria-label={`thumb-${i + 1}`}
+          >
+            {m.type === "image" ? (
+              <img
+                src={m.url}
+                alt="thumb"
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              />
+            ) : (
+              <>
+                {/* kotak gelap + ikon play -> agar tidak putih */}
+                <div
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    display: "grid",
+                    placeItems: "center",
+                    background: "#000",
+                    opacity: 0.85,
+                  }}
+                />
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "grid",
+                    placeItems: "center",
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: 0,
+                      height: 0,
+                      borderLeft: "14px solid white",
+                      borderTop: "9px solid transparent",
+                      borderBottom: "9px solid transparent",
+                    }}
+                  />
+                </div>
+              </>
+            )}
+          </button>
+        ))}
       </div>
     </div>
   );
+}
+
+function arrowStyle(side: "left" | "right"): React.CSSProperties {
+  return {
+    position: "absolute",
+    top: "50%",
+    [side]: 8,
+    transform: "translateY(-50%)",
+    background: "rgba(17,24,39,0.6)",
+    color: "white",
+    border: "none",
+    width: 36,
+    height: 36,
+    borderRadius: 999,
+    display: "grid",
+    placeItems: "center",
+    fontSize: 20,
+    cursor: "pointer",
+  };
 }
