@@ -1,9 +1,29 @@
-// app/listings/[id]/MediaViewer.tsx
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-export type MediaItem = { type: "video" | "image"; url: string };
+export type MediaItem =
+  | { type: "image"; url: string }
+  | { type: "video"; url: string; thumb?: string };
+
+function guessMime(url: string): string | undefined {
+  const ext = (url.split("?")[0].split(".").pop() || "").toLowerCase();
+  switch (ext) {
+    case "mp4":
+      return "video/mp4";
+    case "mov":
+      // banyak MOV dari iPhone: jika H.264 akan jalan; jika HEVC mungkin gagal (ditangani onError)
+      return "video/quicktime";
+    case "m4v":
+      return "video/x-m4v";
+    case "webm":
+      return "video/webm";
+    case "3gp":
+      return "video/3gpp";
+    default:
+      return undefined;
+  }
+}
 
 export default function MediaViewer({
   media,
@@ -13,204 +33,244 @@ export default function MediaViewer({
   title: string;
 }) {
   const [idx, setIdx] = useState(0);
-  const hasMedia = media.length > 0;
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const current = media[idx];
 
-  // swipe support
+  // bisa swipe/drag di HP
   const startX = useRef<number | null>(null);
-  const deltaX = useRef(0);
-
-  const goPrev = () => setIdx((i) => (i > 0 ? i - 1 : media.length - 1));
-  const goNext = () => setIdx((i) => (i + 1) % media.length);
-
-  const onPointerDown = (e: React.PointerEvent) => {
-    startX.current = e.clientX;
-    deltaX.current = 0;
+  const onTouchStart = (e: React.TouchEvent) => {
+    startX.current = e.touches[0].clientX;
   };
-  const onPointerMove = (e: React.PointerEvent) => {
+  const onTouchEnd = (e: React.TouchEvent) => {
     if (startX.current == null) return;
-    deltaX.current = e.clientX - startX.current;
-  };
-  const onPointerUp = () => {
-    if (startX.current == null) return;
-    const dx = deltaX.current;
+    const delta = e.changedTouches[0].clientX - startX.current;
+    if (Math.abs(delta) > 40) {
+      if (delta < 0) next();
+      else prev();
+    }
     startX.current = null;
-    deltaX.current = 0;
-    if (Math.abs(dx) > 40) (dx < 0 ? goNext : goPrev)();
   };
 
-  const thumbs = useMemo(() => media, [media]);
+  function prev() {
+    setIdx((i) => (i - 1 + media.length) % media.length);
+  }
+  function next() {
+    setIdx((i) => (i + 1) % media.length);
+  }
+
+  // jika slide berubah, jeda video
+  useEffect(() => {
+    if (videoRef.current) {
+      try {
+        videoRef.current.pause();
+        videoRef.current.currentTime = 0;
+      } catch {}
+    }
+  }, [idx]);
+
+  const thumbStrip = useMemo(() => {
+    // tampilkan max 8 thumb supaya ringan
+    return media.slice(0, 8);
+  }, [media]);
 
   return (
-    <>
-      {/* MAIN VIEWER */}
+    <section>
+      {/* AREA MEDIA */}
       <div
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
         style={{
           position: "relative",
           borderRadius: 12,
           overflow: "hidden",
           background: "#f3f4f6",
         }}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
       >
-        {hasMedia ? (
-          media[idx].type === "image" ? (
-            <img
-              src={media[idx].url}
-              alt={title}
-              style={{
-                width: "100%",
-                maxHeight: 520,
-                objectFit: "cover",
-                display: "block",
-              }}
-            />
-          ) : (
-            <video
-              key={media[idx].url}
-              src={media[idx].url}
-              controls
-              playsInline
-              style={{ width: "100%", maxHeight: 520, display: "block" }}
-            />
-          )
-        ) : (
-          <div
-            style={{
-              width: "100%",
-              aspectRatio: "16/9",
-              display: "grid",
-              placeItems: "center",
-              color: "#9ca3af",
-            }}
-          >
-            Tidak ada media
-          </div>
-        )}
-
-        {/* ARROWS */}
+        {/* tombol panah kiri/kanan */}
         {media.length > 1 && (
           <>
             <button
-              onClick={goPrev}
               aria-label="Sebelumnya"
-              style={arrowStyle("left")}
+              onClick={prev}
+              style={{
+                position: "absolute",
+                left: 8,
+                top: "50%",
+                transform: "translateY(-50%)",
+                background: "rgba(0,0,0,0.5)",
+                border: "none",
+                color: "#fff",
+                width: 36,
+                height: 36,
+                borderRadius: 999,
+                cursor: "pointer",
+                zIndex: 2,
+              }}
             >
               ‹
             </button>
             <button
-              onClick={goNext}
               aria-label="Berikutnya"
-              style={arrowStyle("right")}
+              onClick={next}
+              style={{
+                position: "absolute",
+                right: 8,
+                top: "50%",
+                transform: "translateY(-50%)",
+                background: "rgba(0,0,0,0.5)",
+                border: "none",
+                color: "#fff",
+                width: 36,
+                height: 36,
+                borderRadius: 999,
+                cursor: "pointer",
+                zIndex: 2,
+              }}
             >
               ›
             </button>
           </>
         )}
+
+        {/* konten */}
+        <div style={{ width: "100%", maxHeight: 520 }}>
+          {current?.type === "image" ? (
+            <img
+              key={current.url}
+              src={current.url}
+              alt={title}
+              style={{
+                width: "100%",
+                height: "auto",
+                objectFit: "cover",
+                display: "block",
+              }}
+              loading="eager"
+            />
+          ) : current ? (
+            <VideoBox url={current.url} title={title} videoRef={videoRef} />
+          ) : null}
+        </div>
       </div>
 
-      {/* Label */}
-      {thumbs.length > 0 && (
-        <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12 }}>
-          Foto &amp; Video Unit
-        </h3>
-      )}
-
-      {/* THUMBNAILS BAR */}
-      {!!thumbs.length && (
+      {/* THUMB STRIP */}
+      {thumbStrip.length > 1 && (
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill,minmax(90px,1fr))",
-            gap: 10,
+            display: "flex",
+            gap: 8,
+            marginTop: 10,
+            overflowX: "auto",
+            paddingBottom: 4,
           }}
         >
-          {thumbs.map((m, i) => (
+          {thumbStrip.map((m, i) => (
             <button
-              key={i}
+              key={i + m.url}
               onClick={() => setIdx(i)}
-              aria-label={`media-${i + 1}`}
+              title={m.type === "video" ? "Video" : "Foto"}
               style={{
-                position: "relative",
-                border: i === idx ? "2px solid #2563eb" : "1px solid #e5e7eb",
-                borderRadius: 10,
+                border:
+                  i === idx ? "2px solid #2563eb" : "1px solid #e5e7eb",
+                borderRadius: 8,
                 padding: 0,
-                overflow: "hidden",
-                background: "transparent",
+                background: "#fff",
                 cursor: "pointer",
               }}
             >
               {m.type === "image" ? (
                 <img
                   src={m.url}
-                  alt={`thumb-${i + 1}`}
-                  style={{ width: "100%", height: 80, objectFit: "cover" }}
+                  alt={title}
+                  style={{ width: 80, height: 64, objectFit: "cover" }}
+                  loading="lazy"
                 />
               ) : (
-                <div style={{ position: "relative" }}>
-                  <video
-                    src={m.url}
-                    muted
-                    playsInline
-                    preload="metadata"
-                    style={{ width: "100%", height: 80, objectFit: "cover" }}
-                  />
-                  {/* Play icon overlay */}
-                  <div
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      display: "grid",
-                      placeItems: "center",
-                      pointerEvents: "none",
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: 28,
-                        height: 28,
-                        borderRadius: "9999px",
-                        background: "rgba(0,0,0,0.55)",
-                        display: "grid",
-                        placeItems: "center",
-                      }}
-                    >
-                      <span
-                        style={{
-                          marginLeft: 2,
-                          color: "white",
-                          fontSize: 18,
-                          lineHeight: 0,
-                        }}
-                      >
-                        ▶
-                      </span>
-                    </div>
-                  </div>
+                <div
+                  style={{
+                    width: 80,
+                    height: 64,
+                    display: "grid",
+                    placeItems: "center",
+                    background: "#0f172a",
+                    color: "#fff",
+                    fontSize: 12,
+                  }}
+                >
+                  ▶ Video
                 </div>
               )}
             </button>
           ))}
         </div>
       )}
-    </>
+    </section>
   );
 }
 
-function arrowStyle(side: "left" | "right"): React.CSSProperties {
-  return {
-    position: "absolute",
-    top: "50%",
-    [side]: 8,
-    transform: "translateY(-50%)",
-    width: 36,
-    height: 36,
-    borderRadius: "9999px",
-    background: "rgba(0,0,0,0.45)",
-    color: "white",
-    border: "none",
-    fontSize: 22,
-    cursor: "pointer",
-  } as React.CSSProperties;
+function VideoBox({
+  url,
+  title,
+  videoRef,
+}: {
+  url: string;
+  title: string;
+  videoRef: React.MutableRefObject<HTMLVideoElement | null>;
+}) {
+  const [failed, setFailed] = useState(false);
+  const mime = guessMime(url);
+
+  return (
+    <div style={{ position: "relative", background: "#000" }}>
+      {!failed ? (
+        <video
+          key={url}
+          ref={videoRef}
+          controls
+          playsInline
+          preload="metadata"
+          style={{ width: "100%", maxHeight: 520, display: "block" }}
+          onError={() => setFailed(true)}
+        >
+          <source src={url} {...(mime ? { type: mime } : {})} />
+          {/* fallback text */}
+          Browser Anda tidak mendukung pemutar video HTML5.
+        </video>
+      ) : (
+        <div
+          style={{
+            color: "#fff",
+            background: "#111827",
+            padding: 16,
+            height: 260,
+            display: "grid",
+            placeItems: "center",
+            textAlign: "center",
+          }}
+        >
+          <div>
+            <p style={{ marginBottom: 8 }}>
+              Video tidak dapat diputar di browser (kemungkinan codec HEVC/HEIC).
+            </p>
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                color: "#60a5fa",
+                textDecoration: "underline",
+                fontWeight: 600,
+              }}
+            >
+              Unduh / buka langsung file video
+            </a>
+            <p style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>
+              Disarankan unggah MP4 (H.264) atau WebM agar tampil di semua
+              browser.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
