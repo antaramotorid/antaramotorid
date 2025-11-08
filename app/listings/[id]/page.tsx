@@ -1,7 +1,7 @@
 // app/listings/[id]/page.tsx
 import Link from "next/link";
 import { supabase } from "../../../lib/supabaseClient";
-import MediaViewer, { MediaItem } from "./MediaViewer";
+import MediaViewer, { type MediaItem } from "./MediaViewer";
 
 function normalizeWa(n: any): string | null {
   if (!n) return null;
@@ -12,7 +12,11 @@ function normalizeWa(n: any): string | null {
   return digits;
 }
 
-export default async function ListingDetail({ params }: { params: { id: string } }) {
+export default async function ListingDetail({
+  params,
+}: {
+  params: { id: string };
+}) {
   // 1) Ambil data listing
   const { data: listing } = await supabase
     .from("listings")
@@ -22,96 +26,115 @@ export default async function ListingDetail({ params }: { params: { id: string }
 
   if (!listing) {
     return (
-      <main style={{ maxWidth: 960, margin: "40px auto", padding: "0 16px" }}>
+      <main style={{ maxWidth: 960, margin: "40px auto" }}>
         <h1>Listing tidak ditemukan</h1>
-        <p><Link href="/listings">← Kembali</Link></p>
+        <p>
+          <Link href="/listings">← Kembali</Link>
+        </p>
       </main>
     );
   }
 
-  // 2) FOTO dari bucket mana pun
-  const imageBuckets = ["Listing_image", "listing-images", "listing_images"];
+  // 2) Kumpulkan foto dari bucket mana pun yang tersedia
+  const candidateBuckets = ["Listing_image", "listing-images", "listing_images"];
   const imageUrls: string[] = [];
-  for (const bucket of imageBuckets) {
-    const { data: files, error } = await supabase.storage.from(bucket).list(params.id, { limit: 50 });
+
+  for (const bucket of candidateBuckets) {
+    const { data: files, error } = await supabase.storage
+      .from(bucket)
+      .list(params.id, { limit: 50 });
     if (error) continue;
     if (!files?.length) continue;
+
     for (const f of files) {
-      const { data } = supabase.storage.from(bucket).getPublicUrl(`${params.id}/${f.name}`);
+      const { data } = supabase
+        .storage
+        .from(bucket)
+        .getPublicUrl(`${params.id}/${f.name}`);
       if (data?.publicUrl) imageUrls.push(data.publicUrl);
     }
-    if (imageUrls.length) break;
+    if (imageUrls.length) break; // stop di bucket pertama yang berisi
   }
 
-  // 3) VIDEO – lebih robust: cek folder <id>/ dan root, lalu fallback signed URL
-  const videoBuckets = ["listing-videos", "Listing_videos", "listing_videos"];
+  // 3) Kumpulkan video dari bucket listing-videos
   const videoUrls: string[] = [];
-  const isVideo = (name: string) => {
-    const ext = name.split(".").pop()?.toLowerCase() || "";
-    return ["mp4", "webm", "mov", "m4v"].includes(ext);
-  };
+  {
+    const { data: vfiles } = await supabase
+      .storage
+      .from("listing-videos")
+      .list(params.id, { limit: 20 });
 
-  for (const bucket of videoBuckets) {
-    // a) di dalam folder <id>/
-    const { data: inFolder } = await supabase.storage.from(bucket).list(params.id, { limit: 50 });
-    const candidatesA = (inFolder || []).filter(f => isVideo(f.name)).map(f => `${params.id}/${f.name}`);
-
-    // b) jika kosong, coba root (kadang ter-upload tanpa folder)
-    const { data: inRoot } = await supabase.storage.from(bucket).list("", { limit: 200 });
-    const candidatesB = (inRoot || [])
-      .filter(f => isVideo(f.name))
-      // izinkan file yang diawali id_ atau mengandung id sebagai folder lain
-      .filter(f => f.name.toLowerCase().includes(params.id.toLowerCase()))
-      .map(f => f.name);
-
-    const paths = [...candidatesA, ...candidatesB];
-
-    for (const path of paths) {
-      // coba public url dulu
-      const pub = supabase.storage.from(bucket).getPublicUrl(path).data?.publicUrl;
-      if (pub) {
-        videoUrls.push(pub);
-        continue;
+    if (vfiles?.length) {
+      for (const f of vfiles) {
+        const ext = f.name.split(".").pop()?.toLowerCase();
+        if (ext && ["mp4", "webm", "mov", "m4v"].includes(ext)) {
+          const { data } = supabase
+            .storage
+            .from("listing-videos")
+            .getPublicUrl(`${params.id}/${f.name}`);
+          if (data?.publicUrl) videoUrls.push(data.publicUrl);
+        }
       }
-      // fallback: signed url 7 hari (butuh policy SELECT: createsignedurl)
-      const signed = await supabase.storage.from(bucket).createSignedUrl(path, 60 * 60 * 24 * 7);
-      if (signed.data?.signedUrl) videoUrls.push(signed.data.signedUrl);
     }
-    if (videoUrls.length) break;
   }
 
-  // 4) Susun media: VIDEO dulu, baru FOTO
+  // 4) Susun media: video dulu (jika ada), lalu foto—sesuai tipe MediaViewer
   const media: MediaItem[] = [
-    ...videoUrls.map((url) => ({ type: "video" as const, url })),
-    ...imageUrls.map((url) => ({ type: "image" as const, url })),
+    ...videoUrls.map((url) => ({ kind: "video" as const, url })),
+    ...imageUrls.map((url) => ({ kind: "image" as const, url })),
   ];
 
-  // 5) Util tampilan & WA
+  // Util tampilan
   const rp = (n: any) =>
     typeof n === "number"
-      ? new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n)
+      ? new Intl.NumberFormat("id-ID", {
+          style: "currency",
+          currency: "IDR",
+          maximumFractionDigits: 0,
+        }).format(n)
       : "—";
 
-  const phoneRaw = (listing as any).whatsapp || (listing as any).contact_whatsapp || null;
+  const phoneRaw =
+    (listing as any).whatsapp || (listing as any).contact_whatsapp || null;
   const wa = normalizeWa(phoneRaw);
 
-  // 6) Render
   return (
     <main style={{ maxWidth: 1100, margin: "40px auto", padding: "0 16px" }}>
-      <p><Link href="/listings">← Kembali ke Listings</Link></p>
+      <p>
+        <Link href="/listings">← Kembali ke Listings</Link>
+      </p>
 
+      {/* Slider foto & video (video tampil pertama bila ada) */}
       <MediaViewer media={media} title={listing.title || "Unit"} />
 
-      <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12 }}>Foto &amp; Video Unit</h3>
+      {/* Label grid thumbnail (ditangani di MediaViewer, label di sini) */}
+      <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12 }}>
+        Foto &amp; Video Unit
+      </h3>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 18, flexWrap: "wrap" }}>
-        <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0 }}>{listing.title}</h1>
+      {/* Info listing + WA */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          marginTop: 10,
+          flexWrap: "wrap",
+        }}
+      >
+        <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0 }}>
+          {listing.title}
+        </h1>
         {wa && (
           <a
             href={`https://wa.me/${wa}`}
             target="_blank"
             rel="noopener noreferrer"
-            style={{ padding: "10px 14px", border: "1px solid #10b981", borderRadius: 10 }}
+            style={{
+              padding: "10px 14px",
+              border: "1px solid #10b981",
+              borderRadius: 10,
+            }}
           >
             Chat via WhatsApp
           </a>
@@ -119,15 +142,44 @@ export default async function ListingDetail({ params }: { params: { id: string }
       </div>
 
       <p style={{ color: "#6b7280", marginTop: 6 }}>
-        {listing.brand || "—"} • {listing.year ?? "—"} {listing.location ? `• ${listing.location}` : ""}
+        {(listing.brand || "—").toString().toLowerCase()} •{" "}
+        {listing.year ?? "—"}{" "}
+        {listing.location ? `• ${listing.location}` : ""}
       </p>
-      <p style={{ fontSize: 22, fontWeight: 800, marginTop: 10 }}>{rp(listing.price)}</p>
+      <p style={{ fontSize: 22, fontWeight: 800, marginTop: 10 }}>
+        {rp(listing.price)}
+      </p>
 
       {listing.description && (
         <>
-          <h3 style={{ fontSize: 18, fontWeight: 700, marginTop: 18 }}>Deskripsi</h3>
+          <h3 style={{ fontSize: 18, fontWeight: 700, marginTop: 18 }}>
+            Deskripsi
+          </h3>
           <p style={{ whiteSpace: "pre-wrap" }}>{listing.description}</p>
         </>
+      )}
+
+      {/* Peta lokasi (opsional bila ada lokasi) */}
+      {listing.location && (
+        <section style={{ marginTop: 24 }}>
+          <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
+            Lokasi Penjual
+          </h3>
+          <div style={{ borderRadius: 12, overflow: "hidden" }}>
+            <iframe
+              title="Lokasi penjual"
+              width="100%"
+              height="320"
+              style={{ border: 0 }}
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+              // pencarian lokasi sederhana via embed Google Maps
+              src={`https://www.google.com/maps?q=${encodeURIComponent(
+                String(listing.location)
+              )}&output=embed`}
+            />
+          </div>
+        </section>
       )}
     </main>
   );
