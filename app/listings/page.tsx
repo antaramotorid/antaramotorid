@@ -2,113 +2,122 @@
 import Link from "next/link";
 import { supabase } from "../../lib/supabaseClient";
 
-/** Ambil 1 foto pertama untuk sebuah listingId dari bucket yang tersedia */
-async function getFirstImageUrl(listingId: string): Promise<string | null> {
-  // PRIORITAS BARU: listing-images (hyphen)
-  const candidateBuckets = ["listing-images", "Listing_image", "listing_images"];
+/** Ambil 1 foto pertama (jika ada) untuk sebuah listingId dari bucket `listing-images` */
+async function getFirstImagePublicUrl(listingId: string) {
+  // List file di folder {listingId} dalam bucket listing-images
+  const { data: files, error } = await supabase.storage
+    .from("listing-images")
+    .list(listingId, {
+      limit: 1,
+      sortBy: { column: "name", order: "asc" },
+    });
 
-  for (const bucket of candidateBuckets) {
-    const { data: files, error } = await supabase.storage
-      .from(bucket)
-      .list(listingId, { limit: 50 });
+  if (error || !files || files.length === 0) return null;
 
-    if (error) continue;
-    if (!files?.length) continue;
-
-    // cari file gambar duluan
-    const firstImage =
-      files.find((f) => /\.(jpg|jpeg|png|webp)$/i.test(f.name)) ?? files[0];
-
-    if (firstImage) {
-      const { data } = supabase.storage
-        .from(bucket)
-        .getPublicUrl(`${listingId}/${firstImage.name}`);
-      if (data?.publicUrl) return data.publicUrl;
-    }
-  }
-  return null;
+  const path = `${listingId}/${files[0].name}`;
+  const { data: pub } = supabase.storage.from("listing-images").getPublicUrl(path);
+  return pub?.publicUrl ?? null;
 }
 
-const rp = (n: any) =>
-  typeof n === "number"
-    ? new Intl.NumberFormat("id-ID", {
-        style: "currency",
-        currency: "IDR",
-        maximumFractionDigits: 0,
-      }).format(n)
-    : "—";
+type ListingRow = {
+  id: string;
+  title: string | null;
+  brand: string | null;
+  year: number | null;
+  location: string | null;
+  price: number | null;
+};
 
 export default async function ListingsPage() {
-  const { data: listings } = await supabase
+  // Ambil daftar listing
+  const { data: listings, error } = await supabase
     .from("listings")
-    .select("*")
+    .select("id,title,brand,year,location,price")
     .order("created_at", { ascending: false })
     .limit(24);
 
+  if (error) {
+    return (
+      <div style={{ padding: 24 }}>
+        <h1>Listing Terbaru</h1>
+        <p>Gagal memuat data: {error.message}</p>
+      </div>
+    );
+  }
+
+  const withThumbs = await Promise.all(
+    (listings ?? []).map(async (l: ListingRow) => {
+      const thumb = await getFirstImagePublicUrl(l.id);
+      return { ...l, thumb };
+    })
+  );
+
   return (
-    <main style={{ maxWidth: 1100, margin: "40px auto", padding: "0 16px" }}>
-      <h1 style={{ fontSize: 32, fontWeight: 900, marginBottom: 16 }}>
-        Listing Terbaru
-      </h1>
+    <div style={{ padding: 24 }}>
+      <h1 style={{ fontSize: 32, fontWeight: 800, marginBottom: 16 }}>Listing Terbaru</h1>
 
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+          gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))",
           gap: 16,
         }}
       >
-        {(listings ?? []).map(async (item) => {
-          const img = await getFirstImageUrl(item.id);
-          return (
-            <Link
-              key={item.id}
-              href={`/listings/${item.id}`}
+        {withThumbs.map((l) => (
+          <Link
+            key={l.id}
+            href={`/listings/${l.id}`}
+            style={{
+              textDecoration: "none",
+              borderRadius: 12,
+              border: "1px solid #e5e7eb",
+              padding: 12,
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              background: "#fff",
+            }}
+          >
+            <div
               style={{
-                display: "block",
-                border: "1px solid #e5e7eb",
-                borderRadius: 12,
-                padding: 12,
-                textDecoration: "none",
-                color: "inherit",
-                background: "white",
+                width: "100%",
+                aspectRatio: "4/3",
+                borderRadius: 10,
+                overflow: "hidden",
+                background: "#f3f4f6",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
               }}
             >
-              <div
-                style={{
-                  width: "100%",
-                  aspectRatio: "4/3",
-                  borderRadius: 10,
-                  overflow: "hidden",
-                  background: "#f3f4f6",
-                  display: "grid",
-                  placeItems: "center",
-                }}
-              >
-                {img ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={img}
-                    alt={item.title ?? "foto"}
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                  />
-                ) : (
-                  <span style={{ color: "#9ca3af" }}>Tidak ada foto</span>
-                )}
-              </div>
+              {l.thumb ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={l.thumb}
+                  alt={l.title ?? "Foto unit"}
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                />
+              ) : (
+                <span style={{ color: "#9ca3af", fontSize: 14 }}>Tidak ada foto</span>
+              )}
+            </div>
 
-              <h3 style={{ fontSize: 18, fontWeight: 800, margin: "10px 0 4px" }}>
-                {item.title ?? "tanpa judul"}
-              </h3>
-              <p style={{ color: "#6b7280", margin: 0 }}>
-                {(item.brand || "—").toUpperCase()} • {item.year ?? "—"}
-                {item.location ? ` • ${item.location}` : ""}
-              </p>
-              <p style={{ fontWeight: 800, marginTop: 6 }}>{rp(item.price)}</p>
-            </Link>
-          );
-        })}
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <strong style={{ fontSize: 18, color: "#111827" }}>
+                {l.title ?? "Tanpa judul"}
+              </strong>
+              <span style={{ fontSize: 12, color: "#6b7280" }}>
+                {(l.brand ?? "").toUpperCase()} • {l.year ?? "-"} • {l.location ?? "-"}
+              </span>
+              {typeof l.price === "number" && (
+                <span style={{ fontWeight: 800 }}>
+                  Rp {l.price.toLocaleString("id-ID")}
+                </span>
+              )}
+            </div>
+          </Link>
+        ))}
       </div>
-    </main>
+    </div>
   );
 }
