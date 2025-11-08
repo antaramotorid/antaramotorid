@@ -1,349 +1,277 @@
 // app/sell/page.tsx
-"use client";
+'use client';
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import { supabase } from "../../lib/supabaseClient";
+import { useState, useRef } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '../../lib/supabaseClient';
 
 type FormState = {
   title: string;
   brand: string;
-  year: string;        // keep string, cast saat submit
-  price: string;       // keep string, cast saat submit
+  year: string;
+  price: string;
   location: string;
   description: string;
   whatsapp: string;
 };
 
-function normalizeWa(n: string) {
-  const digits = String(n || "").replace(/[^0-9]/g, "");
-  if (!digits) return "";
-  if (digits.startsWith("0")) return "62" + digits.slice(1);
-  if (digits.startsWith("62")) return digits;
-  return digits;
-}
-
 export default function SellPage() {
-  const router = useRouter();
-
+  const r = useRouter();
   const [form, setForm] = useState<FormState>({
-    title: "",
-    brand: "",
-    year: "",
-    price: "",
-    location: "",
-    description: "",
-    whatsapp: "",
+    title: '',
+    brand: '',
+    year: '',
+    price: '',
+    location: '',
+    description: '',
+    whatsapp: '',
   });
 
   const [images, setImages] = useState<File[]>([]);
   const [video, setVideo] = useState<File | null>(null);
+  const [loading, setLoading] = useState(false);
+  const videoProbe = useRef<HTMLVideoElement | null>(null);
 
-  const [errors, setErrors] = useState<string[]>([]);
-  const [submitting, setSubmitting] = useState(false);
-  const [progressText, setProgressText] = useState<string>("");
+  const onChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    setForm(s => ({ ...s, [e.target.name]: e.target.value }));
+  };
 
-  // preview
-  const imagePreviews = useMemo(
-    () => images.map((f) => URL.createObjectURL(f)),
-    [images]
-  );
-  useEffect(() => {
-    return () => imagePreviews.forEach((u) => URL.revokeObjectURL(u));
-  }, [imagePreviews]);
+  // Cek durasi video <= 180 detik saat user pilih file
+  const onPickVideo = async (f: File | null) => {
+    setVideo(null);
+    if (!f) return;
 
-  // cek durasi video (≤ 180 s)
-  const [videoInfo, setVideoInfo] = useState<{ duration: number } | null>(null);
-  const videoProbeRef = useRef<HTMLVideoElement | null>(null);
-
-  useEffect(() => {
-    setVideoInfo(null);
-    if (!video) return;
-    const url = URL.createObjectURL(video);
-    const vid = document.createElement("video");
-    videoProbeRef.current = vid;
-    vid.preload = "metadata";
-    vid.onloadedmetadata = () => {
-      URL.revokeObjectURL(url);
-      const dur = vid.duration || 0;
-      setVideoInfo({ duration: Math.round(dur) });
-    };
-    vid.src = url;
-  }, [video]);
-
-  function onPickImages(files: FileList | null) {
-    if (!files) return;
-    const arr = Array.from(files).filter((f) =>
-      /^image\//.test(f.type)
-    );
-    const merged = [...images, ...arr].slice(0, 6);
-    setImages(merged);
-  }
-
-  function onPickVideo(files: FileList | null) {
-    if (!files || !files[0]) {
-      setVideo(null);
-      setVideoInfo(null);
+    // Batasi tipe
+    const okType = ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-m4v'];
+    if (!okType.includes(f.type)) {
+      alert('Format video harus mp4 / webm / mov / m4v');
       return;
     }
-    const f = files[0];
-    if (!/^video\/(mp4|webm|quicktime|x-m4v)/.test(f.type)) {
-      setErrors(["Tipe video harus mp4/webm/mov/m4v"]);
+
+    // Cek durasi
+    const url = URL.createObjectURL(f);
+    const probe = document.createElement('video');
+    videoProbe.current = probe;
+    const duration = await new Promise<number>((resolve, reject) => {
+      probe.preload = 'metadata';
+      probe.onloadedmetadata = () => {
+        resolve(probe.duration || 0);
+        URL.revokeObjectURL(url);
+      };
+      probe.onerror = () => {
+        reject(new Error('Gagal membaca metadata video'));
+        URL.revokeObjectURL(url);
+      };
+      probe.src = url;
+    }).catch(() => 0);
+
+    if (!duration) {
+      alert('Tidak bisa membaca durasi video. Coba file lain.');
       return;
     }
+    if (duration > 180) {
+      alert('Durasi video maksimal 3 menit (180 detik).');
+      return;
+    }
+
     setVideo(f);
-  }
+  };
 
-  async function handleSubmit(e: React.FormEvent) {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErrors([]);
-    setProgressText("");
-
-    // Validasi dasar
-    const errs: string[] = [];
-    if (!form.title.trim()) errs.push("Judul wajib diisi");
-    if (!form.brand.trim()) errs.push("Merek wajib diisi");
-    const yearNum = form.year ? Number(form.year) : NaN;
-    if (form.year && (isNaN(yearNum) || yearNum < 1950 || yearNum > 2100)) {
-      errs.push("Tahun tidak valid");
-    }
-    const priceNum = form.price ? Number(form.price) : NaN;
-    if (form.price && (isNaN(priceNum) || priceNum < 0)) {
-      errs.push("Harga tidak valid");
-    }
-    if (!images.length && !video) {
-      errs.push("Minimal upload satu foto atau satu video");
-    }
-    if (videoInfo && videoInfo.duration > 180) {
-      errs.push("Durasi video maksimal 3 menit");
-    }
-    if (errs.length) {
-      setErrors(errs);
-      return;
-    }
+    if (loading) return;
+    setLoading(true);
 
     try {
-      setSubmitting(true);
-
-      // 1) Insert listing, dapatkan id
-      setProgressText("Menyimpan data listing…");
-      const { data: created, error: insErr } = await supabase
-        .from("listings")
+      // 1) Insert listing untuk dapatkan ID
+      const { data: inserted, error: insErr } = await supabase
+        .from('listings')
         .insert({
-          title: form.title.trim(),
-          brand: form.brand.trim(),
+          title: form.title || null,
+          brand: form.brand || null,
           year: form.year ? Number(form.year) : null,
           price: form.price ? Number(form.price) : null,
           location: form.location || null,
           description: form.description || null,
-          whatsapp: normalizeWa(form.whatsapp) || null,
+          whatsapp: form.whatsapp || null,
         })
-        .select()
+        .select('id')
         .single();
 
-      if (insErr || !created) {
-        throw new Error(insErr?.message || "Gagal membuat listing");
+      if (insErr || !inserted?.id) {
+        console.error(insErr);
+        alert('Gagal menyimpan listing.');
+        setLoading(false);
+        return;
       }
 
-      const listingId: string = created.id;
+      const listingId: string = inserted.id;
 
-      // 2) Upload FOTO (bucket listing-images/<id>/filename)
+      // 2) Upload FOTO (opsional)
       if (images.length) {
-        let idx = 0;
-        for (const img of images) {
-          idx += 1;
-          setProgressText(`Upload foto ${idx}/${images.length}…`);
-          const fileName = `${Date.now()}-${idx}-${img.name}`.replace(/\s+/g, "_");
-          const path = `${listingId}/${fileName}`;
+        for (const f of images) {
+          // nama file unik
+          const filename = `${Date.now()}-${f.name}`.replace(/\s+/g, '-');
           const { error: upErr } = await supabase
             .storage
-            .from("listing-images")
-            .upload(path, img, { upsert: true, contentType: img.type });
-          if (upErr) throw new Error(`Gagal upload foto: ${upErr.message}`);
+            .from('Listing_image') // kamu pakai bucket ini; jika berbeda, sesuaikan
+            .upload(`${listingId}/${filename}`, f, {
+              cacheControl: '3600',
+              upsert: true,
+            });
+          if (upErr) {
+            console.warn('Upload foto gagal:', upErr.message);
+          }
         }
       }
 
-      // 3) Upload VIDEO (opsional) ke listing-videos-pending
+      // 3) Upload VIDEO (opsional)
       if (video) {
-        setProgressText("Upload video…");
-        const vName = `${Date.now()}-video-${video.name}`.replace(/\s+/g, "_");
-        const vPath = `${listingId}/${vName}`;
+        const vname = `${Date.now()}-${video.name}`.replace(/\s+/g, '-');
         const { error: vErr } = await supabase
           .storage
-          .from("listing-videos-pending")
-          .upload(vPath, video, { upsert: true, contentType: video.type });
-        if (vErr) throw new Error(`Gagal upload video: ${vErr.message}`);
+          .from('listing-videos') // bucket video
+          .upload(`${listingId}/${vname}`, video, {
+            cacheControl: '3600',
+            upsert: true,
+          });
+        if (vErr) {
+          console.warn('Upload video gagal:', vErr.message);
+          alert('Upload video gagal. Coba lagi atau pakai file lain.');
+        }
       }
 
-      setProgressText("Selesai. Mengarahkan ke halaman detail…");
-      router.push(`/listings/${listingId}`);
+      // 4) Beres → ke halaman detail
+      r.push(`/listings/${listingId}`);
     } catch (err: any) {
-      setErrors([err?.message || "Terjadi kesalahan"]);
+      console.error(err);
+      alert('Terjadi kesalahan tak terduga.');
     } finally {
-      setSubmitting(false);
+      setLoading(false);
     }
-  }
+  };
 
   return (
-    <main style={{ maxWidth: 900, margin: "40px auto", padding: "0 16px" }}>
-      <h1 style={{ fontSize: 28, fontWeight: 800, marginBottom: 16 }}>Jual Motor</h1>
+    <main style={{ maxWidth: 720, margin: '40px auto', padding: '0 16px' }}>
+      <h1 style={{ fontSize: 24, fontWeight: 800, marginBottom: 12 }}>Jual Unit</h1>
 
-      {!!errors.length && (
-        <div style={{ background: "#FEF2F2", color: "#991B1B", padding: 12, borderRadius: 8, marginBottom: 16 }}>
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
-            {errors.map((e, i) => <li key={i}>{e}</li>)}
-          </ul>
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit} style={{ display: "grid", gap: 14 }}>
-        {/* Judul */}
-        <label style={{ display: "grid", gap: 6 }}>
-          <span>Judul Listing *</span>
+      <form onSubmit={handleSubmit} style={{ display: 'grid', gap: 12 }}>
+        <div>
+          <label>Judul</label>
           <input
+            name="title"
             value={form.title}
-            onChange={(e) => setForm((s) => ({ ...s, title: e.target.value }))}
-            placeholder="Contoh: Vario 150 Istimewa"
+            onChange={onChange}
+            placeholder="Contoh: Yamaha Fazio 125 2023"
             required
-            style={inputStyle}
+            style={{ width: '100%', padding: 8, border: '1px solid #ddd', borderRadius: 8 }}
           />
-        </label>
-
-        {/* Merek & Tahun */}
-        <div style={{ display: "grid", gap: 12, gridTemplateColumns: "1fr 1fr" }}>
-          <label style={{ display: "grid", gap: 6 }}>
-            <span>Merek *</span>
-            <input
-              value={form.brand}
-              onChange={(e) => setForm((s) => ({ ...s, brand: e.target.value }))}
-              placeholder="honda / yamaha / suzuki"
-              required
-              style={inputStyle}
-            />
-          </label>
-          <label style={{ display: "grid", gap: 6 }}>
-            <span>Tahun *</span>
-            <input
-              value={form.year}
-              onChange={(e) => setForm((s) => ({ ...s, year: e.target.value }))}
-              placeholder="2020"
-              inputMode="numeric"
-              style={inputStyle}
-              required
-            />
-          </label>
         </div>
 
-        {/* Harga */}
-        <label style={{ display: "grid", gap: 6 }}>
-          <span>Harga (Rp) *</span>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div>
+            <label>Merk</label>
+            <input
+              name="brand"
+              value={form.brand}
+              onChange={onChange}
+              placeholder="Yamaha / Honda / dll"
+              style={{ width: '100%', padding: 8, border: '1px solid #ddd', borderRadius: 8 }}
+            />
+          </div>
+          <div>
+            <label>Tahun</label>
+            <input
+              name="year"
+              value={form.year}
+              onChange={onChange}
+              inputMode="numeric"
+              placeholder="2022"
+              style={{ width: '100%', padding: 8, border: '1px solid #ddd', borderRadius: 8 }}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label>Harga (Rp)</label>
           <input
+            name="price"
             value={form.price}
-            onChange={(e) => setForm((s) => ({ ...s, price: e.target.value }))}
-            placeholder="19999999"
+            onChange={onChange}
             inputMode="numeric"
-            style={inputStyle}
-            required
+            placeholder="15000000"
+            style={{ width: '100%', padding: 8, border: '1px solid #ddd', borderRadius: 8 }}
           />
-        </label>
+        </div>
 
-        {/* Lokasi */}
-        <label style={{ display: "grid", gap: 6 }}>
-          <span>Lokasi</span>
+        <div>
+          <label>Lokasi</label>
           <input
+            name="location"
             value={form.location}
-            onChange={(e) => setForm((s) => ({ ...s, location: e.target.value }))}
-            placeholder="Jakarta Timur"
-            style={inputStyle}
+            onChange={onChange}
+            placeholder="Jakarta Selatan"
+            style={{ width: '100%', padding: 8, border: '1px solid #ddd', borderRadius: 8 }}
           />
-        </label>
+        </div>
 
-        {/* WA */}
-        <label style={{ display: "grid", gap: 6 }}>
-          <span>WhatsApp (opsional)</span>
+        <div>
+          <label>WhatsApp</label>
           <input
+            name="whatsapp"
             value={form.whatsapp}
-            onChange={(e) => setForm((s) => ({ ...s, whatsapp: e.target.value }))}
-            placeholder="08xxxxxxxxxx atau 62xxxxxxxxxx"
-            style={inputStyle}
+            onChange={onChange}
+            placeholder="08xxxxxxxxxx"
+            style={{ width: '100%', padding: 8, border: '1px solid #ddd', borderRadius: 8 }}
           />
-        </label>
+        </div>
 
-        {/* Deskripsi */}
-        <label style={{ display: "grid", gap: 6 }}>
-          <span>Deskripsi</span>
+        <div>
+          <label>Deskripsi</label>
           <textarea
+            name="description"
             value={form.description}
-            onChange={(e) => setForm((s) => ({ ...s, description: e.target.value }))}
-            placeholder="Kondisi bagus, pajak hidup..."
+            onChange={onChange}
             rows={4}
-            style={{ ...inputStyle, resize: "vertical" }}
+            placeholder="Kondisi mulus, pajak panjang, tangan pertama…"
+            style={{ width: '100%', padding: 8, border: '1px solid #ddd', borderRadius: 8 }}
           />
-        </label>
+        </div>
 
-        {/* Upload Foto */}
-        <div style={{ display: "grid", gap: 8 }}>
-          <label style={{ fontWeight: 600 }}>Foto Unit (max 6 gambar)</label>
+        <div>
+          <label>Foto Unit (boleh beberapa)</label>
           <input
             type="file"
             accept="image/*"
             multiple
-            onChange={(e) => onPickImages(e.target.files)}
+            onChange={(e) => setImages(Array.from(e.target.files || []))}
           />
-          {!!imagePreviews.length && (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(120px,1fr))", gap: 10 }}>
-              {imagePreviews.map((src, i) => (
-                <div key={i} style={{ position: "relative" }}>
-                  <img src={src} alt={`img-${i}`} style={{ width: "100%", height: 100, objectFit: "cover", borderRadius: 8 }} />
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
-        {/* Upload Video */}
-        <div style={{ display: "grid", gap: 8 }}>
-          <label style={{ fontWeight: 600 }}>Video Unit (opsional, maks 3 menit • mp4/webm/mov/m4v)</label>
+        <div>
+          <label>Video Unit (maks 3 menit, mp4/webm/mov/m4v)</label>
           <input
             type="file"
             accept="video/mp4,video/webm,video/quicktime,video/x-m4v"
-            onChange={(e) => onPickVideo(e.target.files)}
+            onChange={(e) => onPickVideo((e.target.files && e.target.files[0]) || null)}
           />
-          {video && (
-            <div style={{ fontSize: 14, color: "#374151" }}>
-              File: <b>{video.name}</b>
-              {videoInfo && (
-                <> • Durasi: {videoInfo.duration}s {videoInfo.duration > 180 ? " (terlalu panjang)" : ""}</>
-              )}
-            </div>
-          )}
         </div>
 
         <button
           type="submit"
-          disabled={submitting}
+          disabled={loading}
           style={{
-            padding: "12px 16px",
-            background: submitting ? "#9CA3AF" : "#2563EB",
-            color: "white",
+            padding: '10px 14px',
             borderRadius: 10,
-            border: "none",
+            border: '1px solid #111827',
+            background: loading ? '#e5e7eb' : '#111827',
+            color: '#fff',
             fontWeight: 700,
           }}
         >
-          {submitting ? "Mengunggah… " + (progressText || "") : "Terbitkan Listing"}
+          {loading ? 'Menyimpan…' : 'Terbitkan Listing'}
         </button>
-        {submitting && progressText && (
-          <div style={{ color: "#374151" }}>{progressText}</div>
-        )}
       </form>
     </main>
   );
 }
-
-const inputStyle: React.CSSProperties = {
-  border: "1px solid #e5e7eb",
-  borderRadius: 10,
-  padding: "10px 12px",
-  outline: "none",
-};
