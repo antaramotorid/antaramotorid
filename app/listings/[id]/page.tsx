@@ -1,174 +1,158 @@
 // app/listings/[id]/page.tsx
+import Link from "next/link";
 import { supabase } from "../../../lib/supabaseClient";
-import MediaViewer, { MediaItem } from "./MediaViewer";
+import MediaViewer, { type MediaItem } from "./MediaViewer";
 
-type Listing = {
-  id: string;
-  title: string | null;
-  brand: string | null;
-  year: number | null;
-  location: string | null;
-  price: number | null;
-  description: string | null;
-  whatsapp: string | null;
-};
-
-async function getImageUrls(listingId: string) {
-  const { data: files, error } = await supabase.storage
-    .from("listing-images")
-    .list(listingId, { limit: 20, sortBy: { column: "name", order: "asc" } });
-
-  if (error || !files) return [];
-  return files
-    .filter((f) => f.name) // basic guard
-    .map((f) => {
-      const path = `${listingId}/${f.name}`;
-      const { data: pub } = supabase.storage.from("listing-images").getPublicUrl(path);
-      return pub?.publicUrl;
-    })
-    .filter(Boolean) as string[];
+/** --- Util kecil --- */
+function normalizeWa(n: any): string | null {
+  if (!n) return null;
+  const digits = String(n).replace(/[^0-9]/g, "");
+  if (!digits) return null;
+  if (digits.startsWith("0")) return "62" + digits.slice(1);
+  if (digits.startsWith("62")) return digits;
+  return digits;
 }
 
-async function getVideoUrls(listingId: string) {
-  const { data: files, error } = await supabase.storage
-    .from("listing-videos")
-    .list(listingId, { limit: 5, sortBy: { column: "name", order: "asc" } });
+const rp = (n: any) =>
+  typeof n === "number"
+    ? new Intl.NumberFormat("id-ID", {
+        style: "currency",
+        currency: "IDR",
+        maximumFractionDigits: 0,
+      }).format(n)
+    : "—";
 
-  if (error || !files) return [];
-  return files
-    .filter((f) => f.name)
-    .map((f) => {
-      const path = `${listingId}/${f.name}`;
-      const { data: pub } = supabase.storage.from("listing-videos").getPublicUrl(path);
-      return pub?.publicUrl;
-    })
-    .filter(Boolean) as string[];
+/** --- Helper ambil URL publik gambar & video dari storage --- */
+/** Catatan: prioritas bucket ke 'listing-images'. Yang lain tetap dicoba jika ada (aman). */
+const IMAGE_BUCKET_CANDIDATES = ["listing-images", "Listing_image", "listing_images"] as const;
+const VIDEO_BUCKET = "listing-videos";
+
+async function listFilesFromFirstAvailableBucket(
+  folder: string,
+  candidates: readonly string[]
+): Promise<{ bucket: string; files: { name: string }[] } | null> {
+  for (const bucket of candidates) {
+    const { data: files, error } = await supabase.storage.from(bucket).list(folder, { limit: 100 });
+    if (!error && files && files.length) {
+      return { bucket, files };
+    }
+  }
+  return null;
 }
 
-export default async function ListingDetail({
-  params,
-}: {
-  params: { id: string };
-}) {
+async function getImageUrls(listingId: string): Promise<string[]> {
+  const found = await listFilesFromFirstAvailableBucket(listingId, IMAGE_BUCKET_CANDIDATES);
+  if (!found) return [];
+  const { bucket, files } = found;
+  return files
+    .filter(f => /\.(jpg|jpeg|png|webp|gif)$/i.test(f.name))
+    .map(f => supabase.storage.from(bucket).getPublicUrl(`${listingId}/${f.name}`).data.publicUrl)
+    .filter(Boolean);
+}
+
+async function getVideoUrls(listingId: string): Promise<string[]> {
+  const { data: files, error } = await supabase.storage.from(VIDEO_BUCKET).list(listingId, { limit: 10 });
+  if (error || !files?.length) return [];
+  return files
+    .filter(f => /\.(mp4|webm|mov|m4v)$/i.test(f.name))
+    .map(f => supabase.storage.from(VIDEO_BUCKET).getPublicUrl(`${listingId}/${f.name}`).data.publicUrl)
+    .filter(Boolean);
+}
+
+/** --- Page --- */
+export default async function ListingDetail({ params }: { params: { id: string } }) {
   const id = params.id;
 
-  // Ambil data listing
-  const { data: listing, error } = await supabase
-    .from("listings")
-    .select("*")
-    .eq("id", id)
-    .single<Listing>();
+  // 1) Ambil data listing
+  const { data: listing } = await supabase.from("listings").select("*").eq("id", id).single();
 
-  if (error || !listing) {
+  if (!listing) {
     return (
-      <div style={{ padding: 24 }}>
+      <main style={{ maxWidth: 980, margin: "40px auto", padding: "0 16px" }}>
         <h1>Listing tidak ditemukan</h1>
-        {error && <p>{error.message}</p>}
-      </div>
+        <p>
+          <Link href="/listings">← Kembali</Link>
+        </p>
+      </main>
     );
   }
 
-  // Ambil media dari storage (video dulu agar tampil pertama)
+  // 2) Ambil media dari storage (video dulu agar tampil pertama)
   const [videos, images] = await Promise.all([getVideoUrls(id), getImageUrls(id)]);
+
+  // 3) Susun untuk MediaViewer (WAJIB pakai key 'type' sesuai MediaViewer)
   const media: MediaItem[] = [
-    ...videos.map((url) => ({ type: "video" as const, url })),
-    ...images.map((url) => ({ type: "image" as const, url })),
+    ...videos.map(url => ({ type: "video" as const, url })),
+    ...images.map(url => ({ type: "image" as const, url })),
   ];
 
+  // 4) Siapkan data kontak & lokasi
+  const phoneRaw = (listing as any).whatsapp || (listing as any).contact_whatsapp || null;
+  const wa = normalizeWa(phoneRaw);
+
+  const locationStr: string | null =
+    (listing as any).location && typeof (listing as any).location === "string"
+      ? (listing as any).location
+      : null;
+
   return (
-    <div style={{ padding: 16, display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
-      {/* Viewer media */}
-      <MediaViewer media={media} title={listing.title ?? "Unit"} />
+    <main style={{ maxWidth: 1100, margin: "40px auto", padding: "0 16px" }}>
+      <p style={{ marginBottom: 12 }}>
+        <Link href="/listings">← Kembali ke Listings</Link>
+      </p>
 
-      {/* Judul + harga + meta */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0 }}>
-          {listing.title ?? "Tanpa judul"}
-        </h1>
+      {/* Slider foto & video (video tampil pertama bila ada) */}
+      <MediaViewer media={media} title={listing.title || "Unit"} />
+
+      {/* Header + WA */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 18, flexWrap: "wrap" }}>
+        <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0 }}>{listing.title}</h1>
+        {wa && (
+          <a
+            href={`https://wa.me/${wa}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              padding: "10px 14px",
+              border: "1px solid #10b981",
+              borderRadius: 10,
+              textDecoration: "none",
+            }}
+          >
+            Chat via WhatsApp
+          </a>
+        )}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <span style={{ fontSize: 12, color: "#6b7280" }}>
-            {(listing.brand ?? "").toUpperCase()} • {listing.year ?? "-"} •{" "}
-            {listing.location ?? "-"}
-          </span>
-          {typeof listing.price === "number" && (
-            <strong style={{ fontSize: 22 }}>
-              Rp {listing.price.toLocaleString("id-ID")}
-            </strong>
-          )}
-          <div>
-            <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12, marginBottom: 6 }}>
-              Deskripsi
-            </h3>
-            <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>
-              {listing.description ?? "-"}
-            </p>
-          </div>
-        </div>
+      {/* Info ringkas */}
+      <p style={{ color: "#6b7280", marginTop: 6 }}>
+        {(listing as any).brand || "—"} • {(listing as any).year ?? "—"}{" "}
+        {locationStr ? `• ${locationStr}` : ""}
+      </p>
+      <p style={{ fontSize: 22, fontWeight: 800, marginTop: 10 }}>{rp((listing as any).price)}</p>
 
-        {/* Thumbnail bar sederhana (opsional, MediaViewer sudah ada thumb) */}
-        <div>
-          <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>
-            Foto &amp; Video Unit
-          </h3>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {media.length === 0 && (
-              <div
-                style={{
-                  width: 88,
-                  height: 88,
-                  borderRadius: 10,
-                  border: "1px dashed #e5e7eb",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#9ca3af",
-                  fontSize: 12,
-                }}
-              >
-                Tidak ada media
-              </div>
-            )}
-            {media.map((m, i) =>
-              m.kind === "image" ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  key={i}
-                  src={m.url}
-                  alt={`foto-${i + 1}`}
-                  style={{
-                    width: 88,
-                    height: 88,
-                    objectFit: "cover",
-                    borderRadius: 10,
-                    border: "1px solid #e5e7eb",
-                  }}
-                />
-              ) : (
-                <div
-                  key={i}
-                  style={{
-                    width: 88,
-                    height: 88,
-                    borderRadius: 10,
-                    border: "1px solid #e5e7eb",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 12,
-                    background: "#f9fafb",
-                  }}
-                  title="Video"
-                >
-                  🎬
-                </div>
-              )
-            )}
+      {/* Deskripsi */}
+      {(listing as any).description && (
+        <>
+          <h3 style={{ fontSize: 18, fontWeight: 700, marginTop: 18 }}>Deskripsi</h3>
+          <p style={{ whiteSpace: "pre-wrap" }}>{(listing as any).description}</p>
+        </>
+      )}
+
+      {/* Peta (optional, pakai query alamat) */}
+      {locationStr && (
+        <>
+          <h3 style={{ fontSize: 18, fontWeight: 700, marginTop: 18 }}>Lokasi</h3>
+          <div style={{ borderRadius: 12, overflow: "hidden", border: "1px solid #e5e7eb" }}>
+            <iframe
+              title="Map Lokasi"
+              src={`https://www.google.com/maps?q=${encodeURIComponent(locationStr)}&output=embed`}
+              style={{ width: "100%", height: 320, border: 0 }}
+              loading="lazy"
+            />
           </div>
-        </div>
-      </div>
-    </div>
+        </>
+      )}
+    </main>
   );
 }
