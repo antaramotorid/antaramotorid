@@ -6,19 +6,16 @@ import { supabase } from "../../lib/supabaseClient";
 const IMAGE_BUCKETS = ["Listing_image", "listing-images", "listing_images"];
 
 /** Ambil 1 foto pertama untuk sebuah listingId dari bucket yang tersedia */
-async function getFirstImageUrl(listingId: string): Promise<string | null> {
+async function getFirstImageFromBuckets(listingId: string): Promise<string | null> {
   for (const bucket of IMAGE_BUCKETS) {
-    // List isi folder {id}/ di bucket
     const { data: files, error } = await supabase.storage
       .from(bucket)
       .list(listingId, { limit: 50, sortBy: { column: "name", order: "asc" } });
 
     if (error || !files || files.length === 0) continue;
 
-    // Pilih file gambar pertama yang wajar
-    const first = files.find(f =>
-      /\.(jpg|jpeg|png|webp|gif)$/i.test(f.name)
-    ) ?? files[0];
+    const first =
+      files.find((f) => /\.(jpg|jpeg|png|webp|gif)$/i.test(f.name)) ?? files[0];
 
     const { data } = supabase.storage
       .from(bucket)
@@ -27,6 +24,34 @@ async function getFirstImageUrl(listingId: string): Promise<string | null> {
     if (data?.publicUrl) return data.publicUrl;
   }
   return null;
+}
+
+/** Fallback: ambil 1 path dari tabel listing_images lalu jadikan public URL */
+async function getFirstImageFromTable(listingId: string): Promise<string | null> {
+  const { data: rows } = await supabase
+    .from("listing_images")
+    .select("file_path")
+    .eq("listing_id", listingId)
+    .limit(1);
+
+  const row = rows?.[0];
+  if (!row?.file_path) return null;
+
+  // file_path contoh: "Listing_image/07c9ad8f-.../nama.jpg"
+  const path = String(row.file_path);
+  const slash = path.indexOf("/");
+  if (slash === -1) return null;
+
+  const bucket = path.slice(0, slash);
+  const objectPath = path.slice(slash + 1);
+
+  const { data } = supabase.storage.from(bucket).getPublicUrl(objectPath);
+  return data?.publicUrl ?? null;
+}
+
+/** Wrapper: coba dari bucket dulu, kalau tidak ada pakai tabel */
+async function getFirstImageUrl(listingId: string): Promise<string | null> {
+  return (await getFirstImageFromBuckets(listingId)) ?? (await getFirstImageFromTable(listingId));
 }
 
 type ListingRow = {
@@ -55,16 +80,22 @@ export default async function ListingsPage() {
       url: await getFirstImageUrl(row.id),
     }))
   );
-  const thumbMap = new Map(thumbs.map(t => [t.id, t.url]));
+  const thumbMap = new Map(thumbs.map((t) => [t.id, t.url]));
 
   const toIDR = (n: number | null) =>
     typeof n === "number"
-      ? new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n)
+      ? new Intl.NumberFormat("id-ID", {
+          style: "currency",
+          currency: "IDR",
+          maximumFractionDigits: 0,
+        }).format(n)
       : "—";
 
   return (
     <main style={{ maxWidth: 1100, margin: "40px auto", padding: "0 16px" }}>
-      <h1 style={{ fontWeight: 700, fontSize: 24, marginBottom: 16 }}>Listing Terbaru</h1>
+      <h1 style={{ fontWeight: 700, fontSize: 24, marginBottom: 16 }}>
+        Listing Terbaru
+      </h1>
 
       {rows.length === 0 && <p>Tidak ada data.</p>}
 
@@ -81,14 +112,30 @@ export default async function ListingsPage() {
         {rows.map((l) => {
           const img = thumbMap.get(l.id) || null;
           return (
-            <li key={l.id} style={{ border: "1px solid #e5e7eb", borderRadius: 12, overflow: "hidden", background: "#fff" }}>
-              <Link href={`/listings/${l.id}`} style={{ display: "block", textDecoration: "none", color: "inherit" }}>
+            <li
+              key={l.id}
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: 12,
+                overflow: "hidden",
+                background: "#fff",
+              }}
+            >
+              <Link
+                href={`/listings/${l.id}`}
+                style={{ display: "block", textDecoration: "none", color: "inherit" }}
+              >
                 {/* Thumbnail */}
                 {img ? (
                   <img
                     src={img}
                     alt={l.title ?? "foto unit"}
-                    style={{ width: "100%", height: 150, objectFit: "cover", display: "block" }}
+                    style={{
+                      width: "100%",
+                      height: 150,
+                      objectFit: "cover",
+                      display: "block",
+                    }}
                     loading="lazy"
                   />
                 ) : (
@@ -109,13 +156,23 @@ export default async function ListingsPage() {
 
                 {/* Info */}
                 <div style={{ padding: 12 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, lineHeight: "18px", marginBottom: 6 }}>
+                  <div
+                    style={{
+                      fontWeight: 700,
+                      fontSize: 14,
+                      lineHeight: "18px",
+                      marginBottom: 6,
+                    }}
+                  >
                     {l.title ?? "Unit"}
                   </div>
                   <div style={{ fontSize: 12, color: "#6b7280" }}>
-                    {(l.brand ?? "—")} • {(l.year ?? "—")}{l.location ? ` • ${l.location}` : ""}
+                    {(l.brand ?? "—")} • {(l.year ?? "—")}
+                    {l.location ? ` • ${l.location}` : ""}
                   </div>
-                  <div style={{ marginTop: 6, fontWeight: 800 }}>{toIDR(l.price)}</div>
+                  <div style={{ marginTop: 6, fontWeight: 800 }}>
+                    {toIDR(l.price)}
+                  </div>
                 </div>
               </Link>
             </li>
