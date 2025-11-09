@@ -1,198 +1,159 @@
 // app/listings/[id]/page.tsx
-import Link from "next/link";
 import { supabase } from "../../../lib/supabaseClient";
 import MediaViewer, { type MediaItem } from "./MediaViewer";
 
-// --- helpers ----------------------------------------------------
-function normalizeWa(n: any): string | null {
-  if (!n) return null;
-  const digits = String(n).replace(/[^0-9]/g, "");
-  if (!digits) return null;
-  if (digits.startsWith("0")) return "62" + digits.slice(1);
-  if (digits.startsWith("62")) return digits;
-  return digits;
-}
+type PageProps = { params: { id: string } };
 
-// Google Maps embed helper (ADD)
-function getMapEmbedUrl(location?: string | null) {
-  if (!location) return null;
-  const q = encodeURIComponent(location);
-  return `https://www.google.com/maps?q=${q}&output=embed`;
-}
-
-// Ambil semua URL gambar dari bucket kandidat
-async function getImageUrls(id: string): Promise<string[]> {
-  const buckets = ["Listing_image", "listing-images", "listing_images"];
+// --- Helpers ambil media dari storage ---
+async function getVideoUrls(listingId: string): Promise<string[]> {
+  const buckets = ["listing-videos", "listing_videos", "listing-videos-pending"];
   for (const bucket of buckets) {
-    const { data: files, error } = await supabase.storage
-      .from(bucket)
-      .list(id, { limit: 50 });
+    const { data: files, error } = await supabase.storage.from(bucket).list(listingId, { limit: 100 });
     if (error || !files?.length) continue;
+    const videos = files.filter((f) => /\.(mp4|webm|ogg|mov|m4v)$/i.test(f.name));
+    if (!videos.length) continue;
 
-    const urls: string[] = [];
-    for (const f of files) {
-      const { data } = supabase.storage
-        .from(bucket)
-        .getPublicUrl(`${id}/${f.name}`);
-      if (data?.publicUrl) urls.push(data.publicUrl);
-    }
-    if (urls.length) return urls;
+    return videos
+      .map((v) => {
+        const path = `${listingId}/${v.name}`;
+        const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+        return data?.publicUrl ?? "";
+      })
+      .filter(Boolean);
   }
   return [];
 }
 
-// Ambil semua URL video dari bucket video
-async function getVideoUrls(id: string): Promise<string[]> {
-  const bucket = "listing-videos";
-  const { data: files, error } = await supabase.storage
-    .from(bucket)
-    .list(id, { limit: 10 });
-  if (error || !files?.length) return [];
-  const urls: string[] = [];
-  for (const f of files) {
-    const { data } = supabase.storage
-      .from(bucket)
-      .getPublicUrl(`${id}/${f.name}`);
-    if (data?.publicUrl) urls.push(data.publicUrl);
+async function getImageUrls(listingId: string): Promise<string[]> {
+  const buckets = ["listing-images", "listing_image", "listing_images"];
+  for (const bucket of buckets) {
+    const { data: files, error } = await supabase.storage.from(bucket).list(listingId, { limit: 100 });
+    if (error || !files?.length) continue;
+    const images = files.filter((f) => /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name));
+    if (!images.length) continue;
+
+    return images
+      .map((img) => {
+        const path = `${listingId}/${img.name}`;
+        const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+        return data?.publicUrl ?? "";
+      })
+      .filter(Boolean);
   }
-  return urls;
+  return [];
 }
 
-// --- page -------------------------------------------------------
-export default async function ListingDetail({
-  params,
-}: {
-  params: { id: string };
-}) {
-  // 1) Ambil data listing
-  const { data: listing } = await supabase
-    .from("listings")
-    .select("*")
-    .eq("id", params.id)
-    .single();
+function rp(n: any) {
+  if (typeof n !== "number") return "—";
+  return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n);
+}
 
-  if (!listing) {
-    return (
-      <main style={{ maxWidth: 960, margin: "40px auto", padding: "0 16px" }}>
-        <h1>Listing tidak ditemukan</h1>
-        <p>
-          <Link href="/listings">← Kembali ke Listings</Link>
-        </p>
-      </main>
-    );
-  }
+export default async function ListingDetailPage({ params }: PageProps) {
+  const id = params.id;
 
-  // 2) Ambil media dari storage (video dulu agar tampil pertama)
-  const [videos, images] = await Promise.all([
-    getVideoUrls(params.id),
-    getImageUrls(params.id),
-  ]);
+  // 1) Data listing
+  const { data: listing } = await supabase.from("listings").select("*").eq("id", id).single();
 
-  // 3) Susun media untuk MediaViewer (type: "video" | "image")
+  // 2) Media (video dulu agar tampil pertama)
+  const [videoUrls, imageUrls] = await Promise.all([getVideoUrls(id), getImageUrls(id)]);
   const media: MediaItem[] = [
-    ...videos.map((url) => ({ type: "video" as const, url })),
-    ...images.map((url) => ({ type: "image" as const, url })),
+    ...videoUrls.map((url) => ({ type: "video" as const, url })),
+    ...imageUrls.map((url) => ({ type: "image" as const, url })),
   ];
 
-  // 4) Util format & WA
-  const rp = (n: any) =>
-    typeof n === "number"
-      ? new Intl.NumberFormat("id-ID", {
-          style: "currency",
-          currency: "IDR",
-          maximumFractionDigits: 0,
-        }).format(n)
-      : "—";
+  // 3) Maps embed (tanpa API key)
+  const mapsQuery = encodeURIComponent(
+    (listing?.location && String(listing.location).trim()) || "Jakarta, Indonesia"
+  );
+  const mapsSrc = `https://www.google.com/maps?q=${mapsQuery}&output=embed`;
 
-  const phoneRaw =
-    (listing as any).whatsapp || (listing as any).contact_whatsapp || null;
-  const wa = normalizeWa(phoneRaw);
-  const mapSrc = getMapEmbedUrl(listing.location);
-
-  // 5) Render
   return (
-    <main style={{ maxWidth: 1100, margin: "40px auto", padding: "0 16px" }}>
-      <p>
-        <Link href="/listings">← Kembali ke Listings</Link>
-      </p>
+    <main style={{ maxWidth: 1100, margin: "24px auto", padding: "0 16px" }}>
+      {/* Media slider */}
+      <MediaViewer media={media} title={listing?.title || "Unit"} />
 
-      {/* Slider foto & video (video tampil pertama bila ada) */}
-      <MediaViewer media={media} title={listing.title || "Unit"} />
+      {/* Header & ringkasan */}
+      <div style={{ display: "flex", gap: 24, alignItems: "flex-start", marginTop: 16, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 260, flex: "1 1 320px" }}>
+          <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0 }}>{listing?.title}</h1>
+          <p style={{ margin: "6px 0 0", color: "#6b7280", textTransform: "lowercase" }}>
+            {(listing?.brand || "").toLowerCase()} {listing?.year ? `• ${listing.year}` : ""}{" "}
+            {listing?.location ? `• ${listing.location}` : ""}
+          </p>
+          <div style={{ fontSize: 22, fontWeight: 900, marginTop: 10 }}>{rp(listing?.price)}</div>
 
-      {/* Judul + WA */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          marginTop: 18,
-          flexWrap: "wrap",
-        }}
-      >
-        <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0 }}>
-          {listing.title}
-        </h1>
-        {wa && (
-          <a
-            href={`https://wa.me/${wa}`}
-            target="_blank"
-            rel="noopener noreferrer"
+          {/* Spesifikasi tambahan (Warna, Tipe, KM) */}
+          <div
             style={{
-              padding: "10px 14px",
-              border: "1px solid #10b981",
-              borderRadius: 10,
+              marginTop: 10,
+              padding: "10px 12px",
+              border: "1px solid #e5e7eb",
+              borderRadius: 12,
+              background: "#fafafa",
+              fontSize: 14,
+              lineHeight: 1.5,
+              color: "#111827",
+              maxWidth: 520,
             }}
           >
-            Chat via WhatsApp
-          </a>
-        )}
-      </div>
+            <div><b>Warna</b>: {listing?.color || "—"}</div>
+            <div><b>Tipe/Model</b>: {listing?.unit_type || "—"}</div>
+            <div>
+              <b>Kilometer</b>: {typeof listing?.mileage_km === "number" ? `${listing.mileage_km.toLocaleString("id-ID")} km` : "—"}
+            </div>
+          </div>
 
-      {/* Meta singkat */}
-      <p style={{ color: "#6b7280", marginTop: 6 }}>
-        {listing.brand || "—"} • {listing.year ?? "—"}
-        {listing.location ? ` • ${listing.location}` : ""}
-      </p>
-      <p style={{ fontSize: 22, fontWeight: 800, marginTop: 10 }}>
-        {rp(listing.price)}
-      </p>
+          {/* Tombol WA */}
+          <div style={{ marginTop: 12 }}>
+            <a
+              href={listing?.whatsapp ? `https://wa.me/${listing.whatsapp}` : "#"}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: "inline-block",
+                padding: "8px 12px",
+                border: "1px solid #e5e7eb",
+                borderRadius: 10,
+                textDecoration: "none",
+                color: "#111827",
+                background: "#fff",
+              }}
+            >
+              Chat via WhatsApp
+            </a>
+          </div>
 
-      {/* Lokasi + MAP (ADD) */}
-      <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 18 }}>
-        Lokasi Penjual
-      </h3>
-      <p style={{ margin: "6px 0 12px 0" }}>{listing.location || "-"}</p>
-      {mapSrc && (
-        <div
-          style={{
-            width: "100%",
-            borderRadius: 12,
-            overflow: "hidden",
-            boxShadow: "0 1px 6px rgba(0,0,0,.08)",
-            marginBottom: 16,
-          }}
-        >
-          <iframe
-            title="Lokasi Penjual"
-            src={mapSrc}
-            width="100%"
-            height="240"
-            style={{ border: 0, display: "block" }}
-            loading="lazy"
-            referrerPolicy="no-referrer-when-downgrade"
-          />
+          {/* Deskripsi */}
+          <div style={{ marginTop: 18 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, margin: "0 0 6px" }}>Deskripsi</h3>
+            <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{listing?.description || "—"}</p>
+          </div>
+
+          {/* MAPS — diposisikan DI BAWAH Deskripsi */}
+          <div style={{ marginTop: 18 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, margin: "0 0 10px" }}>Lokasi Penjual</h3>
+            <div
+              style={{
+                width: "100%",
+                maxWidth: 700,
+                borderRadius: 12,
+                overflow: "hidden",
+                border: "1px solid #e5e7eb",
+                background: "#f8fafc",
+              }}
+            >
+              <iframe
+                title="Lokasi Penjual"
+                src={mapsSrc}
+                style={{ width: "100%", height: 360, border: 0, display: "block" }}
+                loading="lazy"
+                allowFullScreen
+                referrerPolicy="no-referrer-when-downgrade"
+              />
+            </div>
+          </div>
         </div>
-      )}
-
-      {/* Deskripsi */}
-      {listing.description && (
-        <>
-          <h3 style={{ fontSize: 18, fontWeight: 700, marginTop: 18 }}>
-            Deskripsi
-          </h3>
-          <p style={{ whiteSpace: "pre-wrap" }}>{listing.description}</p>
-        </>
-      )}
+      </div>
     </main>
   );
 }
