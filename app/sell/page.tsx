@@ -231,7 +231,7 @@ export default function SellPage() {
             <input value={form.brand} onChange={onChange("brand")} placeholder="Yamaha / Honda / Suzuki" />
           </div>
 
-          <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(3, 1fr)", gapRow: 8 }}>
+          <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(3, 1fr)", rowGap: 8 }}>
             <div style={{ display: "grid", gap: 8 }}>
               <label>Tahun</label>
               <input value={form.year} onChange={onChange("year")} placeholder="2021" inputMode="numeric" />
@@ -246,7 +246,7 @@ export default function SellPage() {
             </div>
           </div>
 
-          <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(2, 1fr)", gapRow: 8 }}>
+          <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(2, 1fr)", rowGap: 8 }}>
             <div style={{ display: "grid", gap: 8 }}>
               <label>Warna</label>
               <input value={form.color} onChange={onChange("color")} placeholder="Hitam, Putih, dll" />
