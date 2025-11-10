@@ -1,43 +1,34 @@
-// app/sell/page.tsx
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../lib/supabaseClient";
 
-// ==== KONFIGURASI TETAP (LOCKED GREEN) ====
-// - 6 slot foto + 1 video
-// - Uploads section di PALING ATAS
-// - Brand → Type dropdown (Indonesia)
-// - Year dropdown 1980..sekarang
-// - Color dropdown
-// - Fields: km (mileage), unit_type, color tetap
-// - Bucket WRITE: images -> listing-images, video -> listing-videos
+/** === TYPE & CONSTANTS YANG SUDAH TERKUNCI === */
+type MediaItem = { type: "image" | "video"; url: string };
 
-const MAX_IMAGES = 6;
-
-// Brand → Type (contoh ringkas, bisa dilengkapi bertahap)
-const BRAND_TYPES: Record<string, string[]> = {
-  honda: ["Vario", "Beat", "Scoopy", "CBR 150", "CBR 250"],
-  yamaha: ["NMAX", "Aerox", "Fazzio", "R15", "R25"],
-  suzuki: ["GSX R150", "Satria F150", "Nex", "Address"],
-  kawasaki: ["Ninja 250", "W175", "ZX-25R"],
-  vespa: ["Primavera", "Sprint", "GTS 300"],
-  "motor listrik": ["Gesits", "Polytron Fox", "Smoot", "ALVA One"],
+// Kartu thumbnail yang kompak
+const THUMB_W = 180;
+const THUMB_ASPECT = "4 / 3";
+const GRID_MAX_WIDTH = 620;
+const thumbStyle: React.CSSProperties = {
+  width: "100%",
+  aspectRatio: THUMB_ASPECT,
+  border: "1px dashed #D1D5DB",
+  borderRadius: 14,
+  background: "#FAFAFA",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  position: "relative",
+  overflow: "hidden",
+  cursor: "pointer",
 };
-
-// Warna umum (bisa ditambah sewaktu-waktu)
-const COLORS = [
-  "Hitam",
-  "Putih",
-  "Merah",
-  "Biru",
-  "Abu-abu",
-  "Silver",
-  "Kuning",
-  "Hijau",
-  "Cokelat",
-  "Oranye",
-];
+const thumbInnerLabel: React.CSSProperties = {
+  fontSize: 13,
+  color: "#6B7280",
+  textAlign: "center",
+  userSelect: "none",
+};
 
 // Tahun 1980..current
 const YEARS = (() => {
@@ -47,666 +38,633 @@ const YEARS = (() => {
   return arr;
 })();
 
-// Daftar provinsi (static)
-const PROVINCES = [
-  "DKI Jakarta",
-  "Jawa Barat",
-  "Jawa Tengah",
-  "DI Yogyakarta",
-  "Jawa Timur",
-  "Banten",
-  "Bali",
-  "Nusa Tenggara Barat",
-  "Nusa Tenggara Timur",
-  "Aceh",
-  "Sumatera Utara",
-  "Sumatera Barat",
-  "Riau",
-  "Kep. Riau",
-  "Jambi",
-  "Sumatera Selatan",
-  "Bangka Belitung",
-  "Bengkulu",
-  "Lampung",
-  "Kalimantan Barat",
-  "Kalimantan Tengah",
-  "Kalimantan Selatan",
-  "Kalimantan Timur",
-  "Kalimantan Utara",
-  "Sulawesi Utara",
-  "Sulawesi Tengah",
-  "Sulawesi Selatan",
-  "Sulawesi Tenggara",
-  "Gorontalo",
-  "Sulawesi Barat",
-  "Maluku",
-  "Maluku Utara",
-  "Papua",
-  "Papua Barat",
-  "Papua Selatan",
-  "Papua Tengah",
-  "Papua Pegunungan",
-  "Papua Barat Daya",
+// Brand → Type (ringkas untuk start; bisa diperluas)
+const BRAND_TYPES: Record<string, string[]> = {
+  Honda: ["Vario", "Beat", "Scoopy", "PCX", "CBR 150", "CBR 250", "CRF 150", "ADV", "Sonic", "Revo", "Supra"],
+  Yamaha: ["Fazzio", "NMAX", "Aerox", "Lexi", "Mio", "R15", "R25", "XSR 155", "XMAX", "FreeGo", "VEGA"],
+  Suzuki: ["Satria F150", "Nex", "Address", "GSX R150", "GSX S150"],
+  Kawasaki: ["W175", "KLX 150", "Ninja 250", "ZX25R", "Versys 250"],
+  "Motor Listrik": ["Alva One", "Gesits", "Selis", "Viar Q1", "United T1800"],
+};
+
+// Warna umum
+const COLORS = [
+  "Hitam",
+  "Putih",
+  "Merah",
+  "Biru",
+  "Kuning",
+  "Abu-abu",
+  "Hijau",
+  "Cokelat",
+  "Silver",
+  "Gold",
+  "Lainnya",
 ];
 
-type UploadProgress = { filename: string; percent: number };
+/** ========== DATA WILAYAH (SAMPLE TERSTRUKTUR) ==========
+ * Mekanisme dropdown berantai siap; cukup tambah struktur REGIONS
+ * jika ingin meliputi seluruh Indonesia (bisa kita lanjutkan bertahap).
+ */
+type Regions = Record<
+  string, // Provinsi
+  Record<
+    string, // Kota/Kab
+    Record<
+      string, // Kecamatan
+      string[] // Kelurahan
+    >
+  >
+>;
 
-type FormState = {
+// Contoh data awal (DKI & Jabar — termasuk Bekasi, Depok, Bogor, Bandung)
+const REGIONS: Regions = {
+  "DKI Jakarta": {
+    "Jakarta Timur": {
+      "Kramat Jati": ["Dukuh", "Cawang", "Kampung Tengah"],
+      "Cakung": ["Penggilingan", "Ujung Menteng", "Jatinegara"],
+      "Pasar Rebo": ["Gedong", "Baru", "Kalisari"],
+    },
+    "Jakarta Selatan": {
+      "Pasar Minggu": ["Pejaten Timur", "Ragunan", "Jaticempaka"],
+      "Cilandak": ["Gandaria Selatan", "Lebak Bulus", "Cilandak Barat"],
+    },
+  },
+  "Jawa Barat": {
+    Bekasi: {
+      "Bekasi Timur": ["Aren Jaya", "Duren Jaya", "Margahayu"],
+      "Bekasi Barat": ["Bintara", "Jakasampurna", "Kranji"],
+    },
+    Depok: {
+      "Beji": ["Kukusan", "Kemiri Muka", "Beji"],
+      "Sukmajaya": ["Cisalak", "Mekar Jaya", "Abadijaya"],
+    },
+    Bogor: {
+      "Bogor Utara": ["Cibuluh", "Tegal Gundil", "Bantarjati"],
+      "Bogor Selatan": ["Empang", "Ranggamekar", "Batu Tulis"],
+    },
+    Bandung: {
+      "Coblong": ["Dago", "Lebak Gede", "Lebak Siliwangi"],
+      "Kiaracondong": ["Sukapura", "Gumuruh", "Kebon Jayanti"],
+    },
+  },
+};
+
+/** Reverse geocoding: isi dropdown otomatis dari GPS */
+async function reverseGeocode(lat: number, lon: number) {
+  const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=14&accept-language=id`;
+  const res = await fetch(url, {
+    headers: { "User-Agent": "antaramotorid/1.0 (contact: admin@antaramotor.com)" },
+  });
+  if (!res.ok) throw new Error("Reverse geocoding gagal");
+  const data = await res.json();
+  const addr = data?.address || {};
+  // Normalisasi beberapa field
+  return {
+    province:
+      addr.state || addr.region || addr.province || addr.county || addr["ISO3166-2-lvl4"] || addr["state_district"],
+    city:
+      addr.city ||
+      addr.town ||
+      addr.municipality ||
+      addr.village ||
+      addr.county ||
+      addr["city_district"] ||
+      addr.suburb,
+    district: addr.suburb || addr.district || addr["city_district"] || addr.borough,
+    subdistrict: addr.village || addr.suburb || addr.hamlet || addr.neighbourhood,
+  } as { province?: string; city?: string; district?: string; subdistrict?: string };
+}
+
+/** =================== KOMPOSISI FORM =================== */
+type Form = {
   title: string;
   brand: string;
   unit_type: string;
-  year: number | "";
-  price: number | "";
-  color: string;
-  mileage_km: number | "";
-  whatsapp: string;
-  description: string;
+  year?: number;
+  color?: string;
+  mileage_km?: number;
+  price?: number;
+  whatsapp?: string;
+  description?: string;
 
-  // Lokasi lama (tetap dipertahankan)
-  location: string; // ringkas (kota/kabupaten) — tetap ada
+  // Lokasi terstruktur
+  province?: string;
+  city?: string;
+  district?: string;
+  subdistrict?: string;
 
-  // Lokasi baru (tambahan)
-  province: string;
-  regency: string;
-  district: string;
-  subdistrict: string;
-
-  latitude: string;
-  longitude: string;
+  // koordinat disimpan internal (tanpa input)
+  latitude?: number | null;
+  longitude?: number | null;
 };
 
 export default function SellPage() {
-  // ======== STATE FORM ========
-  const [form, setForm] = useState<FormState>({
+  const [form, setForm] = useState<Form>({
     title: "",
     brand: "",
     unit_type: "",
-    year: "",
-    price: "",
-    color: "",
-    mileage_km: "",
+    year: undefined,
+    color: undefined,
+    mileage_km: undefined,
+    price: undefined,
     whatsapp: "",
     description: "",
-    location: "",
 
-    province: "",
-    regency: "",
-    district: "",
-    subdistrict: "",
+    province: undefined,
+    city: undefined,
+    district: undefined,
+    subdistrict: undefined,
 
-    latitude: "",
-    longitude: "",
+    latitude: null,
+    longitude: null,
   });
 
-  // ======== STATE MEDIA (6 foto + 1 video) ========
-  const [images, setImages] = useState<(File | null)[]>(Array(MAX_IMAGES).fill(null));
-  const [imagePreviews, setImagePreviews] = useState<(string | null)[]>(Array(MAX_IMAGES).fill(null));
-  const [imageProgress, setImageProgress] = useState<UploadProgress[]>(
-    Array(MAX_IMAGES).fill(null).map((_, i) => ({ filename: `foto-${i + 1}`, percent: 0 }))
-  );
+  /** ======== Upload state (6 foto + 1 video) ======== */
+  const [imageFiles, setImageFiles] = useState<(File | null)[]>(Array(6).fill(null));
+  const [imagePreviews, setImagePreviews] = useState<(string | null)[]>(Array(6).fill(null));
+  const [imgProgress, setImgProgress] = useState<(number | null)[]>(Array(6).fill(null));
 
-  const [video, setVideo] = useState<File | null>(null);
+  const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoPreview, setVideoPreview] = useState<string | null>(null);
-  const [videoProgress, setVideoProgress] = useState<UploadProgress | null>(null);
+  const [videoProgress, setVideoProgress] = useState<number | null>(null);
 
-  const imgInputs = useRef<(HTMLInputElement | null)[]>([]);
-  const vidInput = useRef<HTMLInputElement | null>(null);
+  const imgInputs = useRef<HTMLInputElement[]>([]);
+  const videoInputRef = useRef<HTMLInputElement>(null);
 
-  // ==== derived types dari brand ====
-  const typeOptions = useMemo(() => {
-    const key = (form.brand || "").toLowerCase();
-    return BRAND_TYPES[key] || [];
-  }, [form.brand]);
+  /** ======== Derived options untuk dropdown berantai ======== */
+  const provinces = useMemo(() => Object.keys(REGIONS), []);
+  const cities = useMemo(() => {
+    if (!form.province || !REGIONS[form.province]) return [];
+    return Object.keys(REGIONS[form.province]);
+  }, [form.province]);
+  const districts = useMemo(() => {
+    if (!form.province || !form.city) return [];
+    const branch = REGIONS[form.province]?.[form.city];
+    return branch ? Object.keys(branch) : [];
+  }, [form.province, form.city]);
+  const subdistricts = useMemo(() => {
+    if (!form.province || !form.city || !form.district) return [];
+    const leaf = REGIONS[form.province]?.[form.city]?.[form.district];
+    return leaf || [];
+  }, [form.province, form.city, form.district]);
 
-  // ==== Handlers umum ====
+  /** ======== Handlers ======== */
   const onChange =
-    <K extends keyof FormState>(key: K) =>
+    (key: keyof Form) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-      const v = e.target.value;
-      setForm((f) => ({ ...f, [key]: key === "price" || key === "mileage_km" ? (v === "" ? "" : Number(v)) : v }));
+      const value = e.target.value;
+      setForm((f) => ({ ...f, [key]: key === "year" ? Number(value) : key === "price" || key === "mileage_km" ? Number(value) : value }));
     };
 
-  // ==== Image slot handlers ====
-  const handlePickImage = (i: number) => {
-    const el = imgInputs.current[i];
-    if (el) el.click();
+  // Brand -> reset type
+  const onBrandChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const brand = e.target.value;
+    setForm((f) => ({ ...f, brand, unit_type: "" }));
   };
 
-  const handleImageSelected = (i: number, file: File | null) => {
-    const nextImages = [...images];
-    nextImages[i] = file;
-    setImages(nextImages);
-
-    const nextPrev = [...imagePreviews];
-    nextPrev[i] = file ? URL.createObjectURL(file) : null;
-    setImagePreviews(nextPrev);
-
-    // reset progress
-    setImageProgress((p) => {
-      const c = [...p];
-      c[i] = { filename: file?.name || `foto-${i + 1}`, percent: file ? 1 : 0 };
-      return c;
+  const handleImagePick = (e: React.ChangeEvent<HTMLInputElement>, index: number) => {
+    const file = e.target.files?.[0] || null;
+    setImageFiles((arr) => {
+      const n = [...arr];
+      n[index] = file;
+      return n;
+    });
+    setImagePreviews((arr) => {
+      const n = [...arr];
+      n[index] = file ? URL.createObjectURL(file) : null;
+      return n;
     });
   };
 
-  // ==== Video handlers ====
-  const handlePickVideo = () => {
-    vidInput.current?.click();
-  };
-
-  const handleVideoSelected = (file: File | null) => {
-    setVideo(file || null);
+  const handleVideoPick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setVideoFile(file);
     setVideoPreview(file ? URL.createObjectURL(file) : null);
-    setVideoProgress(file ? { filename: file.name, percent: 1 } : null);
   };
 
-  // ==== Lokasi (GPS) ====
-  const handleUseMyLocation = () => {
-    if (!navigator.geolocation) {
-      alert("Peramban tidak mendukung Geolocation.");
+  /** Gunakan lokasi saya (GPS) */
+  const useMyLocation = async () => {
+    if (!("geolocation" in navigator)) {
+      alert("Geolocation tidak tersedia di peramban ini.");
       return;
     }
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const { latitude, longitude } = pos.coords;
-        setForm((f) => ({
-          ...f,
-          latitude: String(latitude),
-          longitude: String(longitude),
-        }));
+      async (pos) => {
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        setForm((f) => ({ ...f, latitude: lat, longitude: lon }));
+
+        try {
+          const addr = await reverseGeocode(lat, lon);
+
+          // Pastikan opsi ada di dropdown (kalau belum ada, kita sisipkan sementara)
+          const ensureOption = <T extends string>(arr: T[], value?: T) =>
+            value && !arr.includes(value) ? [value as T, ...arr] : arr;
+
+          // Sisipkan ke dataset runtime (tidak mengubah REGIONS asli)
+          if (addr.province) {
+            // set langsung, dan biarkan dropdown terisi value ini (walau belum ada di REGIONS)
+            setForm((f) => ({
+              ...f,
+              province: addr.province || f.province,
+              city: addr.city || f.city,
+              district: addr.district || f.district,
+              subdistrict: addr.subdistrict || f.subdistrict,
+            }));
+          }
+        } catch (e) {
+          console.error(e);
+        }
       },
       (err) => {
-        if (err.code === 1) {
-          alert("Akses lokasi ditolak. Aktifkan izin lokasi untuk browser Anda.");
-        } else if (err.code === 2) {
-          alert("Sinyal GPS tidak tersedia. Coba aktifkan lokasi atau pindah ke area terbuka.");
-        } else {
-          alert("Gagal mendapatkan lokasi. Coba lagi.");
-        }
+        if (err.code === 1) alert("Izin lokasi ditolak. Aktifkan izin lokasi untuk mengisi otomatis.");
+        else alert("Tidak bisa mengambil lokasi. Coba lagi.");
       },
       { enableHighAccuracy: true, timeout: 10000 }
     );
   };
 
-  // ==== Submit ====
-  const [submitting, setSubmitting] = useState(false);
+  /** Submit */
+  const onSubmit = async () => {
+    // Validasi ringan
+    if (!form.title) return alert("Judul wajib diisi.");
+    if (!form.brand) return alert("Pilih merk.");
+    if (!form.unit_type) return alert("Pilih tipe/model.");
+    if (!form.year) return alert("Pilih tahun.");
+    if (!form.price) return alert("Isi harga.");
+    if (!form.province || !form.city) return alert("Lengkapi lokasi minimal Provinsi & Kab/Kota.");
 
-  async function handleSubmit() {
-    if (submitting) return;
-    try {
-      setSubmitting(true);
+    // 1) Insert listing
+    const payload = {
+      title: form.title,
+      brand: form.brand,
+      unit_type: form.unit_type,
+      year: form.year,
+      color: form.color || null,
+      mileage_km: form.mileage_km ?? null,
+      price: form.price,
+      whatsapp: form.whatsapp || null,
+      description: form.description || null,
 
-      // 1) Buat row listing utama
-      const insertPayload = {
-        title: form.title || null,
-        brand: (form.brand || "").toLowerCase() || null,
-        unit_type: form.unit_type || null,
-        year: form.year === "" ? null : Number(form.year),
-        price: form.price === "" ? null : Number(form.price),
-        color: form.color || null,
-        mileage_km: form.mileage_km === "" ? null : Number(form.mileage_km),
-        whatsapp: form.whatsapp || null,
-        description: form.description || null,
+      province: form.province || null,
+      city: form.city || null,
+      district: form.district || null,
+      subdistrict: form.subdistrict || null,
 
-        // Lokasi ringkas (lama) masih disimpan agar kompatibel
-        location: form.location || null,
+      latitude: form.latitude ?? null,
+      longitude: form.longitude ?? null,
+      created_at: new Date().toISOString(),
+    };
 
-        // Lokasi detail (baru)
-        province: form.province || null,
-        regency: form.regency || null,
-        district: form.district || null,
-        subdistrict: form.subdistrict || null,
-
-        latitude: form.latitude || null,
-        longitude: form.longitude || null,
-      };
-
-      const { data: created, error: insertErr } = await supabase
-        .from("listings")
-        .insert(insertPayload)
-        .select("id")
-        .single();
-
-      if (insertErr || !created?.id) {
-        console.error(insertErr);
-        alert("Gagal menyimpan data listing. Coba lagi.");
-        setSubmitting(false);
-        return;
-      }
-
-      const listingId = created.id as string;
-
-      // 2) Upload FOTO (ke bucket listing-images)
-      for (let i = 0; i < images.length; i++) {
-        const file = images[i];
-        if (!file) continue;
-
-        const path = `${listingId}/${Date.now()}-${i + 1}-${file.name.replace(/\s+/g, "_")}`;
-        // progress simulasi (karena Supabase Storage tidak expose progress upload di SDK)
-        setImageProgress((prev) => {
-          const c = [...prev];
-          c[i] = { filename: file.name, percent: 25 };
-          return c;
-        });
-        const { error: upErr } = await supabase.storage.from("listing-images").upload(path, file, {
-          upsert: false,
-        });
-        if (upErr) {
-          console.error(upErr);
-          setImageProgress((prev) => {
-            const c = [...prev];
-            c[i] = { filename: file.name, percent: 0 };
-            return c;
-          });
-          continue;
-        }
-        setImageProgress((prev) => {
-          const c = [...prev];
-          c[i] = { filename: file.name, percent: 100 };
-          return c;
-        });
-      }
-
-      // 3) Upload VIDEO (opsional) ke bucket listing-videos
-      if (video) {
-        const vpath = `${listingId}/${Date.now()}-${video.name.replace(/\s+/g, "_")}`;
-        setVideoProgress({ filename: video.name, percent: 25 });
-        const { error: vErr } = await supabase.storage.from("listing-videos").upload(vpath, video, {
-          upsert: false,
-        });
-        if (vErr) {
-          console.error(vErr);
-          setVideoProgress({ filename: video.name, percent: 0 });
-        } else {
-          setVideoProgress({ filename: video.name, percent: 100 });
-        }
-      }
-
-      alert("Iklan berhasil diterbitkan!");
-      // reset ringan
-      setForm((f) => ({
-        ...f,
-        title: "",
-        unit_type: "",
-        year: "",
-        price: "",
-        mileage_km: "",
-        whatsapp: "",
-        description: "",
-        location: "",
-        province: "",
-        regency: "",
-        district: "",
-        subdistrict: "",
-        latitude: "",
-        longitude: "",
-      }));
-      setImages(Array(MAX_IMAGES).fill(null));
-      setImagePreviews(Array(MAX_IMAGES).fill(null));
-      setImageProgress(Array(MAX_IMAGES).fill(null).map((_, i) => ({ filename: `foto-${i + 1}`, percent: 0 })));
-      setVideo(null);
-      setVideoPreview(null);
-      setVideoProgress(null);
-    } finally {
-      setSubmitting(false);
+    const { data: inserted, error } = await supabase.from("listings").insert(payload).select("id").single();
+    if (error || !inserted?.id) {
+      console.error(error);
+      alert("Gagal menyimpan listing.");
+      return;
     }
-  }
+    const listingId: string = inserted.id;
 
-  // ==== UI ====
+    // 2) Upload media
+    // Foto
+    for (let i = 0; i < imageFiles.length; i++) {
+      const file = imageFiles[i];
+      if (!file) continue;
+      try {
+        setImgProgress((p) => {
+          const n = [...p];
+          n[i] = 0;
+          return n;
+        });
+
+        // Pakai bucket prioritas "listing-images"
+        const path = `${listingId}/${Date.now()}-${i}-${file.name}`;
+        const { error: upErr } = await supabase.storage
+          .from("listing-images")
+          .upload(path, file, {
+            cacheControl: "3600",
+            upsert: false,
+          });
+
+        if (upErr) throw upErr;
+        setImgProgress((p) => {
+          const n = [...p];
+          n[i] = 100;
+          return n;
+        });
+      } catch (e) {
+        console.error(e);
+        setImgProgress((p) => {
+          const n = [...p];
+          n[i] = null;
+          return n;
+        });
+      }
+    }
+
+    // Video (opsional)
+    if (videoFile) {
+      try {
+        setVideoProgress(0);
+        const vpath = `${listingId}/${Date.now()}-${videoFile.name}`;
+        const { error: vErr } = await supabase.storage.from("listing-videos").upload(vpath, videoFile, {
+          cacheControl: "3600",
+          upsert: false,
+        });
+        if (vErr) throw vErr;
+        setVideoProgress(100);
+      } catch (e) {
+        console.error(e);
+        setVideoProgress(null);
+      }
+    }
+
+    alert("Iklan berhasil diterbitkan!");
+    // Reset ringan
+    setForm((f) => ({ ...f, title: "", description: "", price: undefined }));
+    setImageFiles(Array(6).fill(null));
+    setImagePreviews(Array(6).fill(null));
+    setImgProgress(Array(6).fill(null));
+    setVideoFile(null);
+    setVideoPreview(null);
+    setVideoProgress(null);
+  };
+
   return (
     <main style={{ maxWidth: 1100, margin: "24px auto", padding: "0 16px" }}>
-      <h1 style={{ fontSize: 28, fontWeight: 800, marginBottom: 16 }}>Jual Unit</h1>
+      <h1 style={{ fontSize: 32, fontWeight: 900, marginBottom: 8 }}>Jual Unit</h1>
 
-      {/* =================== UPLOADS SECTION (PALING ATAS) =================== */}
-      <section style={{ marginBottom: 24 }}>
-        <h2 style={{ fontWeight: 800, fontSize: 22, margin: "0 0 12px" }}>Foto Unit (maks {MAX_IMAGES})</h2>
-
-        {/* GRID 3x2 THUMBNAILS */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
-          {Array.from({ length: MAX_IMAGES }).map((_, i) => (
-            <div
-              key={i}
-              style={{
-                position: "relative",
-                width: "100%",
-                aspectRatio: "1 / 1",
-                border: "1px dashed #D1D5DB",
-                borderRadius: 12,
-                overflow: "hidden",
-                background: "#F9FAFB",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-              }}
-              onClick={() => handlePickImage(i)}
-            >
-              {/* preview */}
-              {imagePreviews[i] ? (
-                // eslint-disable-next-line @next/next/no-img-element
+      {/* ================== UPLOADS DI BAGIAN ATAS ================== */}
+      <h2 style={{ fontSize: 20, fontWeight: 800, margin: "16px 0 8px" }}>Foto Unit (maks 6)</h2>
+      <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(3, minmax(0,1fr))", maxWidth: GRID_MAX_WIDTH }}>
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={`img-slot-${i}`} style={{ maxWidth: THUMB_W }}>
+            {imagePreviews[i] ? (
+              <div style={thumbStyle} onClick={() => imgInputs.current[i]?.click()}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={imagePreviews[i] as string}
-                  alt={`foto-${i + 1}`}
+                  alt={`Foto ${i + 1}`}
                   style={{ width: "100%", height: "100%", objectFit: "cover" }}
                 />
-              ) : (
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "#9CA3AF",
-                    fontWeight: 700,
-                    fontSize: 14,
-                    userSelect: "none",
-                  }}
-                >
-                  Upload Foto
-                </div>
-              )}
-
-              {/* overlay progress */}
-              {imageProgress[i]?.percent ? (
-                <div
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    height: 6,
-                    background: "#E5E7EB",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: `${imageProgress[i].percent}%`,
-                      height: "100%",
-                      background: "#10B981",
-                      transition: "width .2s",
-                    }}
-                  />
-                </div>
-              ) : null}
-
-              {/* input hidden */}
-              <input
-                ref={(el) => {
-                  imgInputs.current[i] = el;
-                }}
-                type="file"
-                accept="image/*"
-                hidden
-                onChange={(e) => handleImageSelected(i, e.target.files?.[0] || null)}
-              />
-            </div>
-          ))}
-        </div>
-
-        {/* VIDEO */}
-        <div style={{ marginTop: 18 }}>
-          <h3 style={{ fontWeight: 800, fontSize: 18, margin: "0 0 8px" }}>Video Unit (opsional)</h3>
-          <div
-            onClick={handlePickVideo}
-            style={{
-              position: "relative",
-              width: "100%",
-              maxWidth: 360,
-              aspectRatio: "16 / 9",
-              border: "1px dashed #D1D5DB",
-              borderRadius: 12,
-              overflow: "hidden",
-              background: "#F9FAFB",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-            }}
-          >
-            {videoPreview ? (
-              <video src={videoPreview} style={{ width: "100%", height: "100%", objectFit: "cover" }} controls />
+                {imgProgress[i] != null && (
+                  <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 4, background: "#E5E7EB" }}>
+                    <div style={{ width: `${imgProgress[i]}%`, height: "100%", background: "#111827" }} />
+                  </div>
+                )}
+              </div>
             ) : (
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#9CA3AF",
-                  fontWeight: 700,
-                  fontSize: 14,
-                  userSelect: "none",
-                }}
-              >
-                Upload Video
+              <div style={thumbStyle} onClick={() => imgInputs.current[i]?.click()}>
+                <span style={thumbInnerLabel}>Upload Foto</span>
               </div>
             )}
-
-            {videoProgress ? (
-              <div
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  height: 6,
-                  background: "#E5E7EB",
-                }}
-              >
-                <div
-                  style={{
-                    width: `${videoProgress.percent}%`,
-                    height: "100%",
-                    background: "#10B981",
-                    transition: "width .2s",
-                  }}
-                />
-              </div>
-            ) : null}
-
             <input
-              ref={vidInput}
+              ref={(el) => (imgInputs.current[i] = el!)}
               type="file"
-              accept="video/*"
+              accept="image/*"
               hidden
-              onChange={(e) => handleVideoSelected(e.target.files?.[0] || null)}
+              onChange={(e) => handleImagePick(e, i)}
             />
           </div>
-        </div>
-      </section>
+        ))}
 
-      {/* =================== FORM DATA UNIT =================== */}
-      <section style={{ display: "grid", gap: 12 }}>
+        {/* Slot Video */}
+        <div style={{ maxWidth: THUMB_W }}>
+          <h3 style={{ fontSize: 14, margin: "0 0 6px", color: "#374151" }}>Video Unit (opsional)</h3>
+          {videoPreview ? (
+            <div style={thumbStyle} onClick={() => videoInputRef.current?.click()}>
+              <video src={videoPreview as string} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              {videoProgress != null && (
+                <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 4, background: "#E5E7EB" }}>
+                  <div style={{ width: `${videoProgress}%`, height: "100%", background: "#111827" }} />
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={thumbStyle} onClick={() => videoInputRef.current?.click()}>
+              <span style={thumbInnerLabel}>Upload Video</span>
+            </div>
+          )}
+          <input ref={videoInputRef} type="file" accept="video/*" hidden onChange={handleVideoPick} />
+        </div>
+      </div>
+
+      {/* ================== FORM DETAIL ================== */}
+      <div style={{ display: "grid", gap: 12, gridTemplateColumns: "1fr 1fr", marginTop: 18 }}>
         <div style={{ display: "grid", gap: 8 }}>
           <label>Judul</label>
-          <input value={form.title} onChange={onChange("title")} placeholder="Contoh: Yamaha Fazzio 2023 istimewa" />
-        </div>
-
-        <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr", gapRow: 8 } as any}>
-          <div style={{ display: "grid", gap: 8 }}>
-            <label>Merk</label>
-            <select value={form.brand} onChange={onChange("brand")}>
-              <option value="">Pilih merk</option>
-              {Object.keys(BRAND_TYPES).map((b) => (
-                <option key={b} value={b}>
-                  {b.toUpperCase()}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div style={{ display: "grid", gap: 8 }}>
-            <label>Tipe/Model</label>
-            <select value={form.unit_type} onChange={onChange("unit_type")}>
-              <option value="">Pilih tipe/model</option>
-              {typeOptions.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr 1fr", gapRow: 8 } as any}>
-          <div style={{ display: "grid", gap: 8 }}>
-            <label>Tahun</label>
-            <select value={form.year as any} onChange={onChange("year")}>
-              <option value="">Pilih tahun</option>
-              {YEARS.map((y) => (
-                <option key={y} value={y}>
-                  {y}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div style={{ display: "grid", gap: 8 }}>
-            <label>Warna</label>
-            <select value={form.color} onChange={onChange("color")}>
-              <option value="">Pilih warna</option>
-              {COLORS.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div style={{ display: "grid", gap: 8 }}>
-            <label>Kilometer</label>
-            <input
-              value={form.mileage_km as any}
-              onChange={onChange("mileage_km")}
-              placeholder="25.000"
-              inputMode="numeric"
-            />
-          </div>
-        </div>
-
-        <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr", gapRow: 8 } as any}>
-          <div style={{ display: "grid", gap: 8 }}>
-            <label>Harga (Rp)</label>
-            <input value={form.price as any} onChange={onChange("price")} placeholder="18.000.000" inputMode="numeric" />
-          </div>
-          <div style={{ display: "grid", gap: 8 }}>
-            <label>WhatsApp</label>
-            <input value={form.whatsapp} onChange={onChange("whatsapp")} placeholder="08xxx" />
-          </div>
-        </div>
-
-        <div style={{ display: "grid", gap: 8 }}>
-          <label>Deskripsi</label>
-          <textarea
-            value={form.description}
-            onChange={onChange("description")}
-            placeholder="Kondisi mesin, body, pajak, servis, alasan jual, dll."
-            rows={5}
+          <input
+            value={form.title}
+            onChange={onChange("title")}
+            placeholder="Contoh: Yamaha Fazzio 2024 istimewa"
           />
         </div>
 
-        {/* =================== LOKASI (BARU + LAMA TETAP) =================== */}
-        <div style={{ marginTop: 8 }}>
-          <h3 style={{ fontWeight: 800, margin: "0 0 8px" }}>Lokasi</h3>
-
-          {/* Lokasi ringkas (lama) tetap dipertahankan */}
-          <div style={{ display: "grid", gap: 8, marginBottom: 8 }}>
-            <label>Lokasi (label singkat)</label>
-            <input
-              value={form.location}
-              onChange={onChange("location")}
-              placeholder="Kota/Kabupaten (contoh: Jakarta Timur)"
-            />
-          </div>
-
-          {/* Lokasi detail (tambahan) */}
-          <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr", gapRow: 8 } as any}>
-            <div style={{ display: "grid", gap: 8 }}>
-              <label>Provinsi</label>
-              <select value={form.province} onChange={onChange("province")}>
-                <option value="">Pilih provinsi</option>
-                {PROVINCES.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div style={{ display: "grid", gap: 8 }}>
-              <label>Kab/Kota</label>
-              <input value={form.regency} onChange={onChange("regency")} placeholder="Contoh: Jakarta Timur / Bekasi" />
-            </div>
-            <div style={{ display: "grid", gap: 8 }}>
-              <label>Kecamatan</label>
-              <input value={form.district} onChange={onChange("district")} placeholder="Contoh: Kramat Jati" />
-            </div>
-            <div style={{ display: "grid", gap: 8 }}>
-              <label>Kelurahan</label>
-              <input value={form.subdistrict} onChange={onChange("subdistrict")} placeholder="Contoh: Dukuh" />
-            </div>
-          </div>
-
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-            <div style={{ display: "grid", gap: 6, flex: "1 1 150px" }}>
-              <label>Latitude</label>
-              <input
-                value={form.latitude}
-                onChange={onChange("latitude")}
-                placeholder="-6.2"
-                inputMode="decimal"
-              />
-            </div>
-            <div style={{ display: "grid", gap: 6, flex: "1 1 150px" }}>
-              <label>Longitude</label>
-              <input
-                value={form.longitude}
-                onChange={onChange("longitude")}
-                placeholder="106.8"
-                inputMode="decimal"
-              />
-            </div>
-            <button
-              type="button"
-              onClick={handleUseMyLocation}
-              style={{
-                alignSelf: "end",
-                padding: "10px 12px",
-                borderRadius: 10,
-                border: "1px solid #E5E7EB",
-                background: "#111827",
-                color: "#fff",
-                fontWeight: 700,
-              }}
-            >
-              Gunakan Lokasi Saya (GPS)
-            </button>
-          </div>
+        <div style={{ display: "grid", gap: 8 }}>
+          <label>Tahun</label>
+          <select value={form.year ?? ""} onChange={onChange("year")}>
+            <option value="">Pilih tahun</option>
+            {YEARS.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
         </div>
 
-        <div style={{ marginTop: 16 }}>
+        <div style={{ display: "grid", gap: 8 }}>
+          <label>Merk</label>
+          <select value={form.brand} onChange={onBrandChange}>
+            <option value="">Pilih merk</option>
+            {Object.keys(BRAND_TYPES).map((b) => (
+              <option key={b} value={b}>
+                {b}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ display: "grid", gap: 8 }}>
+          <label>Tipe/Model</label>
+          <select value={form.unit_type} onChange={onChange("unit_type")} disabled={!form.brand}>
+            <option value="">{form.brand ? "Pilih tipe/model" : "Pilih merk dulu"}</option>
+            {(BRAND_TYPES[form.brand] || []).map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ display: "grid", gap: 8 }}>
+          <label>Warna</label>
+          <select value={form.color ?? ""} onChange={onChange("color")}>
+            <option value="">Pilih warna</option>
+            {COLORS.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ display: "grid", gap: 8 }}>
+          <label>Kilometer</label>
+          <input
+            value={form.mileage_km ?? ""}
+            onChange={onChange("mileage_km")}
+            inputMode="numeric"
+            placeholder="25000"
+          />
+        </div>
+
+        <div style={{ display: "grid", gap: 8 }}>
+          <label>Harga (Rp)</label>
+          <input value={form.price ?? ""} onChange={onChange("price")} inputMode="numeric" placeholder="18000000" />
+        </div>
+
+        <div style={{ display: "grid", gap: 8 }}>
+          <label>WhatsApp</label>
+          <input value={form.whatsapp ?? ""} onChange={onChange("whatsapp")} placeholder="08xxx" />
+        </div>
+
+        <div style={{ gridColumn: "1 / -1", display: "grid", gap: 8 }}>
+          <label>Deskripsi</label>
+          <textarea
+            value={form.description ?? ""}
+            onChange={onChange("description")}
+            rows={5}
+            placeholder="Kondisi mesin, bodi, pajak, servis, alasan jual, dll."
+          />
+        </div>
+      </div>
+
+      {/* ================== LOKASI TERSTRUKTUR ================== */}
+      <h2 style={{ fontSize: 20, fontWeight: 800, margin: "16px 0 8px" }}>Lokasi</h2>
+      <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(2, minmax(0,1fr))" }}>
+        <div style={{ display: "grid", gap: 8 }}>
+          <label>Provinsi</label>
+          <select
+            value={form.province ?? ""}
+            onChange={(e) =>
+              setForm((f) => ({
+                ...f,
+                province: e.target.value || undefined,
+                city: undefined,
+                district: undefined,
+                subdistrict: undefined,
+              }))
+            }
+          >
+            <option value="">Pilih Provinsi</option>
+            {provinces.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+            {/* Jika hasil GPS bukan daftar, tetap tampil */}
+            {form.province && !provinces.includes(form.province) && (
+              <option value={form.province}>{form.province}</option>
+            )}
+          </select>
+        </div>
+
+        <div style={{ display: "grid", gap: 8 }}>
+          <label>Kab/Kota</label>
+          <select
+            value={form.city ?? ""}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, city: e.target.value || undefined, district: undefined, subdistrict: undefined }))
+            }
+            disabled={!form.province}
+          >
+            <option value="">{form.province ? "Pilih Kab/Kota" : "Pilih provinsi dulu"}</option>
+            {cities.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+            {form.city && !cities.includes(form.city) && <option value={form.city}>{form.city}</option>}
+          </select>
+        </div>
+
+        <div style={{ display: "grid", gap: 8 }}>
+          <label>Kecamatan</label>
+          <select
+            value={form.district ?? ""}
+            onChange={(e) => setForm((f) => ({ ...f, district: e.target.value || undefined, subdistrict: undefined }))}
+            disabled={!form.city}
+          >
+            <option value="">{form.city ? "Pilih Kecamatan" : "Pilih kab/kota dulu"}</option>
+            {districts.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+            {form.district && !districts.includes(form.district) && <option value={form.district}>{form.district}</option>}
+          </select>
+        </div>
+
+        <div style={{ display: "grid", gap: 8 }}>
+          <label>Kelurahan</label>
+          <select
+            value={form.subdistrict ?? ""}
+            onChange={(e) => setForm((f) => ({ ...f, subdistrict: e.target.value || undefined }))}
+            disabled={!form.district}
+          >
+            <option value="">{form.district ? "Pilih Kelurahan" : "Pilih kecamatan dulu"}</option>
+            {subdistricts.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+            {form.subdistrict && !subdistricts.includes(form.subdistrict) && (
+              <option value={form.subdistrict}>{form.subdistrict}</option>
+            )}
+          </select>
+        </div>
+
+        <div style={{ gridColumn: "1 / -1" }}>
           <button
             type="button"
-            disabled={submitting}
-            onClick={handleSubmit}
+            onClick={useMyLocation}
             style={{
-              padding: "12px 18px",
-              borderRadius: 14,
+              padding: "10px 14px",
+              borderRadius: 10,
               border: "1px solid #E5E7EB",
-              background: submitting ? "#9CA3AF" : "#111827",
+              background: "#111827",
               color: "#fff",
-              fontWeight: 800,
-              cursor: submitting ? "not-allowed" : "pointer",
             }}
           >
-            {submitting ? "Menerbitkan..." : "Terbitkan Iklan"}
+            Gunakan Lokasi Saya (GPS)
           </button>
+          <p style={{ color: "#6B7280", fontSize: 12, marginTop: 6 }}>
+            Jika diminta izin lokasi, pilih <b>Allow</b>. Sistem akan mengisi provinsi/kota/kecamatan/kelurahan
+            otomatis (bila dikenali).
+          </p>
         </div>
+      </div>
 
+      {/* ================== TERBITKAN ================== */}
+      <div style={{ marginTop: 18 }}>
+        <button
+          type="button"
+          onClick={onSubmit}
+          style={{
+            padding: "12px 18px",
+            background: "#111827",
+            color: "white",
+            borderRadius: 12,
+            border: "1px solid #111827",
+            fontWeight: 700,
+          }}
+        >
+          Terbitkan Iklan
+        </button>
         <p style={{ color: "#6B7280", fontSize: 12, marginTop: 8 }}>
           *Batasi konten yang melanggar hukum, SARA, atau dewasa — akan ditolak.
         </p>
-      </section>
+      </div>
     </main>
   );
 }
