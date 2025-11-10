@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../lib/supabaseClient";
+
 // ================== Helpers (static data) ==================
 const YEARS = (() => {
   const now = new Date().getFullYear();
