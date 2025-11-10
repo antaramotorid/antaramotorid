@@ -73,7 +73,7 @@ function MapPicker({ latitude, longitude, onChange }: MapPickerProps) {
     let destroyed = false;
 
     (async () => {
-      const L = (await import("leaflet")).default;
+      const L = await import("leaflet");
       // Fix icon path on Next
       // @ts-ignore
       delete L.Icon.Default.prototype._getIconUrl;
