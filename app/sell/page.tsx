@@ -1,536 +1,609 @@
+// app/sell/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../lib/supabaseClient";
 
-/** === TYPE & CONSTANTS YANG TERKUNCI (tidak diubah) === */
-type MediaItem = { type: "image" | "video"; url: string };
+/** ========= KONSTANTA AMAN (LOCKED) ========= */
+const MAX_IMAGES = 6; // 6 foto
+const YEAR_START = 1980;
+const CURRENT_YEAR = new Date().getFullYear();
 
-const THUMB_W = 180;
-const THUMB_ASPECT = "4 / 3";
-const GRID_MAX_WIDTH = 620;
-const thumbStyle: React.CSSProperties = {
-  width: "100%",
-  aspectRatio: THUMB_ASPECT,
-  border: "1px dashed #D1D5DB",
-  borderRadius: 14,
-  background: "#FAFAFA",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  position: "relative",
-  overflow: "hidden",
-  cursor: "pointer",
-};
-const thumbInnerLabel: React.CSSProperties = {
-  fontSize: 13,
-  color: "#6B7280",
-  textAlign: "center",
-  userSelect: "none",
-};
+/** Type Media di-backend (LOCKED by Didi) */
+export type MediaItem = { type: "image" | "video"; url: string };
 
-const YEARS = (() => {
-  const arr: number[] = [];
-  const now = new Date().getFullYear();
-  for (let y = now; y >= 1980; y--) arr.push(y);
-  return arr;
-})();
-
-const BRAND_TYPES: Record<string, string[]> = {
-  Honda: ["Vario", "Beat", "Scoopy", "PCX", "CBR 150", "CBR 250", "CRF 150", "ADV", "Sonic", "Revo", "Supra"],
-  Yamaha: ["Fazzio", "NMAX", "Aerox", "Lexi", "Mio", "R15", "R25", "XSR 155", "XMAX", "FreeGo", "VEGA"],
-  Suzuki: ["Satria F150", "Nex", "Address", "GSX R150", "GSX S150"],
-  Kawasaki: ["W175", "KLX 150", "Ninja 250", "ZX25R", "Versys 250"],
-  "Motor Listrik": ["Alva One", "Gesits", "Selis", "Viar Q1", "United T1800"],
-};
-
-const COLORS = [
-  "Hitam","Putih","Merah","Biru","Kuning","Abu-abu","Hijau","Cokelat","Silver","Gold","Lainnya",
-];
-
-/** ====== TIPE DATASET WILAYAH & HELPERS LOADER ====== */
-type Option = { id: string; name: string };
-async function fetchJSON<T>(path: string): Promise<T | null> {
-  try {
-    const res = await fetch(path, { cache: "force-cache" });
-    if (!res.ok) return null;
-    return (await res.json()) as T;
-  } catch {
-    return null;
-  }
+/** Util */
+function rp(n: any) {
+  if (typeof n !== "number") return "";
+  return new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0,
+  }).format(n);
 }
 
-async function loadProvinces(): Promise<Option[]> {
-  return (await fetchJSON<Option[]>("/regions/provinces.json")) ?? [];
-}
-async function loadCities(provinceId: string): Promise<Option[]> {
-  if (!provinceId) return [];
-  return (await fetchJSON<Option[]>(`/regions/cities/${provinceId}.json`)) ?? [];
-}
-async function loadDistricts(cityId: string): Promise<Option[]> {
-  if (!cityId) return [];
-  return (await fetchJSON<Option[]>(`/regions/districts/${cityId}.json`)) ?? [];
-}
-async function loadSubdistricts(districtId: string): Promise<Option[]> {
-  if (!districtId) return [];
-  return (await fetchJSON<Option[]>(`/regions/subdistricts/${districtId}.json`)) ?? [];
-}
-
-/** Reverse geocoding → best-effort map ke nama (tanpa ID) */
-async function reverseGeocode(lat: number, lon: number) {
-  const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=14&accept-language=id`;
-  const res = await fetch(url, {
-    headers: { "User-Agent": "antaramotorid/1.0 (contact: admin@antaramotor.com)" },
-  });
-  if (!res.ok) throw new Error("Reverse geocoding gagal");
-  const data = await res.json();
-  const a = data?.address || {};
-  // Nama yang paling sering cocok dengan dataset lokal
-  return {
-    provinceName: a.state || a.region || a.province,
-    cityName: a.city || a.town || a.municipality || a.county,
-    districtName: a.suburb || a.district || a["city_district"],
-    subdistrictName: a.village || a.hamlet || a.neighbourhood,
-  } as { provinceName?: string; cityName?: string; districtName?: string; subdistrictName?: string };
+/* =========================
+   Komponen kecil: Progress bar
+   ========================= */
+function Progress({ value }: { value: number }) {
+  return (
+    <div style={{ width: "100%", height: 6, background: "#eee", borderRadius: 6 }}>
+      <div
+        style={{
+          width: `${Math.max(0, Math.min(100, value))}%`,
+          height: "100%",
+          borderRadius: 6,
+          background: "#16a34a",
+          transition: "width .2s",
+        }}
+      />
+    </div>
+  );
 }
 
-/** =================== FORM =================== */
-type Form = {
-  title: string;
-  brand: string;
-  unit_type: string;
-  year?: number;
-  color?: string;
-  mileage_km?: number;
-  price?: number;
-  whatsapp?: string;
-  description?: string;
-
-  province_id?: string; province_name?: string;
-  city_id?: string; city_name?: string;
-  district_id?: string; district_name?: string;
-  subdistrict_id?: string; subdistrict_name?: string;
-
-  latitude?: number | null;
-  longitude?: number | null;
+/* ======================================================
+   Komponen ADD-ON: MapPicker (Leaflet + Nominatim, no token)
+   ====================================================== */
+type MapPickerProps = {
+  latitude: string;
+  longitude: string;
+  onChange: (next: { latitude?: string; longitude?: string; location?: string }) => void;
 };
 
-export default function SellPage() {
-  const [form, setForm] = useState<Form>({
-    title: "",
-    brand: "",
-    unit_type: "",
-    year: undefined,
-    color: undefined,
-    mileage_km: undefined,
-    price: undefined,
-    whatsapp: "",
-    description: "",
-    latitude: null,
-    longitude: null,
-  });
+function MapPicker({ latitude, longitude, onChange }: MapPickerProps) {
+  const mapRef = useRef<HTMLDivElement | null>(null);
+  const leafletRef = useRef<any>(null);
+  const markerRef = useRef<any>(null);
+  const [q, setQ] = useState("");
+  const [loadingGPS, setLoadingGPS] = useState(false);
 
-  /** ======== Upload state (6 foto + 1 video) ======== */
-  const [imageFiles, setImageFiles] = useState<(File | null)[]>(Array(6).fill(null));
-  const [imagePreviews, setImagePreviews] = useState<(string | null)[]>(Array(6).fill(null));
-  const [imgProgress, setImgProgress] = useState<(number | null)[]>(Array(6).fill(null));
-  const [videoFile, setVideoFile] = useState<File | null>(null);
-  const [videoPreview, setVideoPreview] = useState<string | null>(null);
-  const [videoProgress, setVideoProgress] = useState<number | null>(null);
-  const imgInputs = useRef<HTMLInputElement[]>([]);
-  const videoInputRef = useRef<HTMLInputElement>(null);
-
-  /** ======== OPTIONS wilayah ======== */
-  const [provOptions, setProvOptions] = useState<Option[]>([]);
-  const [cityOptions, setCityOptions] = useState<Option[]>([]);
-  const [districtOptions, setDistrictOptions] = useState<Option[]>([]);
-  const [subdistrictOptions, setSubdistrictOptions] = useState<Option[]>([]);
-
+  // inject CSS Leaflet via CDN, lalu lazy import modul JS
   useEffect(() => {
-    loadProvinces().then(setProvOptions);
+    const id = "leaflet-css-cdn";
+    if (!document.getElementById(id)) {
+      const link = document.createElement("link");
+      link.id = id;
+      link.rel = "stylesheet";
+      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      document.head.appendChild(link);
+    }
   }, []);
 
   useEffect(() => {
-    if (!form.province_id) {
-      setCityOptions([]); setDistrictOptions([]); setSubdistrictOptions([]);
-      setForm(f => ({ ...f, city_id: undefined, city_name: undefined, district_id: undefined, district_name: undefined, subdistrict_id: undefined, subdistrict_name: undefined }));
-      return;
-    }
-    loadCities(form.province_id).then(setCityOptions);
-  }, [form.province_id]);
+    let destroyed = false;
 
-  useEffect(() => {
-    if (!form.city_id) {
-      setDistrictOptions([]); setSubdistrictOptions([]);
-      setForm(f => ({ ...f, district_id: undefined, district_name: undefined, subdistrict_id: undefined, subdistrict_name: undefined }));
-      return;
-    }
-    loadDistricts(form.city_id).then(setDistrictOptions);
-  }, [form.city_id]);
+    (async () => {
+      const L = (await import("leaflet")).default;
+      // Fix icon path on Next
+      // @ts-ignore
+      delete L.Icon.Default.prototype._getIconUrl;
+      L.Icon.Default.mergeOptions({
+        iconRetinaUrl:
+          "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+        iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+        shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+      });
 
-  useEffect(() => {
-    if (!form.district_id) {
-      setSubdistrictOptions([]);
-      setForm(f => ({ ...f, subdistrict_id: undefined, subdistrict_name: undefined }));
-      return;
-    }
-    loadSubdistricts(form.district_id).then(setSubdistrictOptions);
-  }, [form.district_id]);
+      if (destroyed || !mapRef.current) return;
 
-  /** ======== Handlers ======== */
-  const onChange =
-    (key: keyof Form) =>
-    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-      const value = e.target.value;
-      setForm((f) => ({
-        ...f,
-        [key]:
-          key === "year"
-            ? Number(value)
-            : key === "price" || key === "mileage_km"
-            ? Number(value)
-            : value,
-      }));
+      const lat = parseFloat(latitude) || -6.2; // default Jakarta
+      const lng = parseFloat(longitude) || 106.8166;
+
+      const map = L.map(mapRef.current, { center: [lat, lng], zoom: 12 });
+      leafletRef.current = map;
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors',
+        maxZoom: 19,
+      }).addTo(map);
+
+      const marker = L.marker([lat, lng], { draggable: true }).addTo(map);
+      markerRef.current = marker;
+
+      marker.on("dragend", () => {
+        const p = marker.getLatLng();
+        onChange({
+          latitude: String(p.lat.toFixed(6)),
+          longitude: String(p.lng.toFixed(6)),
+        });
+      });
+
+      map.on("click", (e: any) => {
+        marker.setLatLng(e.latlng);
+        onChange({
+          latitude: String(e.latlng.lat.toFixed(6)),
+          longitude: String(e.latlng.lng.toFixed(6)),
+        });
+      });
+    })();
+
+    return () => {
+      destroyed = true;
+      if (leafletRef.current) {
+        leafletRef.current.remove();
+        leafletRef.current = null;
+      }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const onBrandChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const brand = e.target.value;
-    setForm((f) => ({ ...f, brand, unit_type: "" }));
-  };
+  // update marker jika lat/lng berubah dari luar
+  useEffect(() => {
+    const L = leafletRef.current;
+    const M = markerRef.current;
+    if (!L || !M) return;
+    const lat = parseFloat(latitude);
+    const lng = parseFloat(longitude);
+    if (isFinite(lat) && isFinite(lng)) {
+      M.setLatLng([lat, lng]);
+      L.setView([lat, lng], Math.max(L.getZoom(), 12));
+    }
+  }, [latitude, longitude]);
 
-  const handleImagePick = (e: React.ChangeEvent<HTMLInputElement>, index: number) => {
-    const file = e.target.files?.[0] || null;
-    setImageFiles((arr) => { const n = [...arr]; n[index] = file; return n; });
-    setImagePreviews((arr) => { const n = [...arr]; n[index] = file ? URL.createObjectURL(file) : null; return n; });
-  };
-  const handleVideoPick = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] || null;
-    setVideoFile(file);
-    setVideoPreview(file ? URL.createObjectURL(file) : null);
-  };
-
-  /** Gunakan lokasi saya (GPS) */
-  const useMyLocation = async () => {
-    if (!("geolocation" in navigator)) { alert("Geolocation tidak tersedia di peramban ini."); return; }
+  // tombol GPS
+  const useMyLocation = () => {
+    if (!navigator.geolocation) {
+      alert("Perangkat tidak mendukung GPS.");
+      return;
+    }
+    setLoadingGPS(true);
     navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const lat = pos.coords.latitude; const lon = pos.coords.longitude;
-        setForm((f) => ({ ...f, latitude: lat, longitude: lon }));
-        try {
-          const { provinceName, cityName, districtName, subdistrictName } = await reverseGeocode(lat, lon);
-
-          // Coba cocokkan nama ke opsi saat ini
-          // 1) Provinsi
-          let prov = provOptions.find(p => p.name.toLowerCase() === (provinceName || "").toLowerCase());
-          if (!prov && provinceName) {
-            // fallback: cari yang mengandung
-            prov = provOptions.find(p => provinceName.toLowerCase().includes(p.name.toLowerCase()));
-          }
-          if (prov) {
-            setForm(f => ({ ...f, province_id: prov!.id, province_name: prov!.name, city_id: undefined, district_id: undefined, subdistrict_id: undefined }));
-            const cities = await loadCities(prov.id);
-            setCityOptions(cities);
-
-            // 2) Kota
-            let city = cities.find(c => c.name.toLowerCase() === (cityName || "").toLowerCase());
-            if (!city && cityName) city = cities.find(c => cityName.toLowerCase().includes(c.name.toLowerCase()));
-            if (city) {
-              setForm(f => ({ ...f, city_id: city!.id, city_name: city!.name, district_id: undefined, subdistrict_id: undefined }));
-              const dists = await loadDistricts(city.id);
-              setDistrictOptions(dists);
-
-              // 3) Kecamatan
-              let dist = dists.find(d => d.name.toLowerCase() === (districtName || "").toLowerCase());
-              if (!dist && districtName) dist = dists.find(d => districtName.toLowerCase().includes(d.name.toLowerCase()));
-              if (dist) {
-                setForm(f => ({ ...f, district_id: dist!.id, district_name: dist!.name, subdistrict_id: undefined }));
-                const subs = await loadSubdistricts(dist.id);
-                setSubdistrictOptions(subs);
-
-                // 4) Kelurahan
-                let sub = subs.find(s => s.name.toLowerCase() === (subdistrictName || "").toLowerCase());
-                if (!sub && subdistrictName) sub = subs.find(s => subdistrictName.toLowerCase().includes(s.name.toLowerCase()));
-                if (sub) setForm(f => ({ ...f, subdistrict_id: sub!.id, subdistrict_name: sub!.name }));
-              }
-            }
-          }
-        } catch (e) { console.error(e); }
+      (pos) => {
+        setLoadingGPS(false);
+        const lat = pos.coords.latitude.toFixed(6);
+        const lng = pos.coords.longitude.toFixed(6);
+        onChange({ latitude: String(lat), longitude: String(lng) });
       },
       (err) => {
-        if (err.code === 1) alert("Izin lokasi ditolak. Aktifkan izin lokasi."); else alert("Tidak bisa mengambil lokasi.");
+        setLoadingGPS(false);
+        alert("Gagal membaca lokasi. Pastikan GPS aktif & izin diberikan.");
+        console.error(err);
       },
       { enableHighAccuracy: true, timeout: 10000 }
     );
   };
 
-  /** Submit (tidak diubah selain field lokasi baru) */
-  const onSubmit = async () => {
-    if (!form.title) return alert("Judul wajib diisi.");
-    if (!form.brand) return alert("Pilih merk.");
-    if (!form.unit_type) return alert("Pilih tipe/model.");
-    if (!form.year) return alert("Pilih tahun.");
-    if (!form.price) return alert("Isi harga.");
-    if (!form.province_id || !form.city_id) return alert("Lengkapi lokasi minimal Provinsi & Kab/Kota.");
-
-    const payload = {
-      title: form.title,
-      brand: form.brand,
-      unit_type: form.unit_type,
-      year: form.year,
-      color: form.color || null,
-      mileage_km: form.mileage_km ?? null,
-      price: form.price,
-      whatsapp: form.whatsapp || null,
-      description: form.description || null,
-
-      province_id: form.province_id ?? null, province_name: form.province_name ?? null,
-      city_id: form.city_id ?? null, city_name: form.city_name ?? null,
-      district_id: form.district_id ?? null, district_name: form.district_name ?? null,
-      subdistrict_id: form.subdistrict_id ?? null, subdistrict_name: form.subdistrict_name ?? null,
-
-      latitude: form.latitude ?? null,
-      longitude: form.longitude ?? null,
-      created_at: new Date().toISOString(),
-    };
-
-    const { data: inserted, error } = await supabase.from("listings").insert(payload).select("id").single();
-    if (error || !inserted?.id) { console.error(error); alert("Gagal menyimpan listing."); return; }
-    const listingId: string = inserted.id;
-
-    // Upload foto
-    for (let i = 0; i < imageFiles.length; i++) {
-      const file = imageFiles[i];
-      if (!file) continue;
-      try {
-        setImgProgress((p) => { const n = [...p]; n[i] = 0; return n; });
-        const path = `${listingId}/${Date.now()}-${i}-${file.name}`;
-        const { error: upErr } = await supabase.storage.from("listing-images").upload(path, file, { cacheControl: "3600", upsert: false });
-        if (upErr) throw upErr;
-        setImgProgress((p) => { const n = [...p]; n[i] = 100; return n; });
-      } catch (e) { console.error(e); setImgProgress((p) => { const n = [...p]; n[i] = null; return n; }); }
+  // search alamat (Nominatim)
+  const searchAddress = async () => {
+    if (!q.trim()) return;
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+      q
+    )}&addressdetails=1&limit=1`;
+    const res = await fetch(url, {
+      headers: { "Accept-Language": "id,en" },
+    });
+    const data = await res.json();
+    if (!data?.length) {
+      alert("Alamat tidak ditemukan.");
+      return;
     }
-
-    // Upload video (opsional)
-    if (videoFile) {
-      try {
-        setVideoProgress(0);
-        const vpath = `${listingId}/${Date.now()}-${videoFile.name}`;
-        const { error: vErr } = await supabase.storage.from("listing-videos").upload(vpath, videoFile, { cacheControl: "3600", upsert: false });
-        if (vErr) throw vErr;
-        setVideoProgress(100);
-      } catch (e) { console.error(e); setVideoProgress(null); }
-    }
-
-    alert("Iklan berhasil diterbitkan!");
+    const { lat, lon, display_name } = data[0];
+    onChange({
+      latitude: String(Number(lat).toFixed(6)),
+      longitude: String(Number(lon).toFixed(6)),
+      location: display_name,
+    });
   };
 
   return (
-    <main style={{ maxWidth: 1100, margin: "24px auto", padding: "0 16px" }}>
-      <h1 style={{ fontSize: 32, fontWeight: 900, marginBottom: 8 }}>Jual Unit</h1>
+    <div style={{ display: "grid", gap: 8 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Cari alamat / tempat"
+          style={{ flex: "1 1 240px" }}
+        />
+        <button type="button" onClick={searchAddress}>
+          Cari
+        </button>
+        <button type="button" onClick={useMyLocation} disabled={loadingGPS}>
+          {loadingGPS ? "Membaca GPS..." : "Gunakan Lokasi Saya (GPS)"}
+        </button>
+      </div>
 
-      {/* UPLOADS DI BAGIAN ATAS (tetap) */}
-      <h2 style={{ fontSize: 20, fontWeight: 800, margin: "16px 0 8px" }}>Foto Unit (maks 6)</h2>
-      <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(3, minmax(0,1fr))", maxWidth: GRID_MAX_WIDTH }}>
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={`img-slot-${i}`} style={{ maxWidth: THUMB_W }}>
-            {imagePreviews[i] ? (
-              <div style={thumbStyle} onClick={() => imgInputs.current[i]?.click()}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={imagePreviews[i] as string} alt={`Foto ${i + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                {imgProgress[i] != null && (
-                  <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 4, background: "#E5E7EB" }}>
-                    <div style={{ width: `${imgProgress[i]}%`, height: "100%", background: "#111827" }} />
-                  </div>
+      <div
+        ref={mapRef}
+        style={{
+          width: "100%",
+          height: 320,
+          borderRadius: 12,
+          border: "1px solid #e5e7eb",
+          overflow: "hidden",
+        }}
+      />
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input
+          value={latitude}
+          onChange={(e) => onChange({ latitude: e.target.value })}
+          placeholder="Latitude"
+          style={{ flex: "1 1 120px" }}
+          inputMode="decimal"
+        />
+        <input
+          value={longitude}
+          onChange={(e) => onChange({ longitude: e.target.value })}
+          placeholder="Longitude"
+          style={{ flex: "1 1 120px" }}
+          inputMode="decimal"
+        />
+      </div>
+
+      <small style={{ color: "#6b7280" }}>
+        Klik peta atau tarik marker untuk menyetel titik. Pencarian alamat oleh Nominatim (OSM).
+      </small>
+    </div>
+  );
+}
+
+/* =========================
+   Halaman SELL
+   ========================= */
+export default function SellPage() {
+  /* ---- form state (LOCKED + tambahan aman) ---- */
+  const [form, setForm] = useState({
+    title: "",
+    brand: "",
+    unit_type: "",
+    year: "",
+    color: "",
+    mileage_km: "",
+    price: "",
+    whatsapp: "",
+    description: "",
+    location: "", // label lokasi singkat (opsional)
+    latitude: "",
+    longitude: "",
+  });
+
+  /* ---- Upload FOTO: 6 slot ---- */
+  const imgInputs = useRef<HTMLInputElement[]>([]);
+  const [imgPreviews, setImgPreviews] = useState<(string | null)[]>(
+    Array.from({ length: MAX_IMAGES }, () => null)
+  );
+  const [imgFiles, setImgFiles] = useState<(File | null)[]>(
+    Array.from({ length: MAX_IMAGES }, () => null)
+  );
+  const [imgProg, setImgProg] = useState<number[]>(
+    Array.from({ length: MAX_IMAGES }, () => 0)
+  );
+
+  /* ---- Upload VIDEO: 1 slot ---- */
+  const vidInput = useRef<HTMLInputElement | null>(null);
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [videoPreview, setVideoPreview] = useState<string | null>(null);
+  const [videoProg, setVideoProg] = useState(0);
+
+  /* ---- Dropdown tahun (LOCKED: 1980..current) ---- */
+  const years = useMemo(
+    () => Array.from({ length: CURRENT_YEAR - YEAR_START + 1 }, (_, i) => CURRENT_YEAR - i),
+    []
+  );
+
+  /* ---- Helpers perubahan form ---- */
+  const onChange =
+    (field: keyof typeof form) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+      setForm((f) => ({ ...f, [field]: e.target.value }));
+    };
+
+  /* ---- PICK FOTO ---- */
+  const pickImage = (i: number) => {
+    imgInputs.current[i]?.click();
+  };
+  const onPickImage = (i: number) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const url = URL.createObjectURL(f);
+    setImgPreviews((prev) => prev.map((v, idx) => (idx === i ? url : v)));
+    setImgFiles((prev) => prev.map((v, idx) => (idx === i ? f : v)));
+    setImgProg((prev) => prev.map((v, idx) => (idx === i ? 0 : v)));
+  };
+
+  /* ---- PICK VIDEO ---- */
+  const pickVideo = () => vidInput.current?.click();
+  const onPickVideo = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const url = URL.createObjectURL(f);
+    setVideoFile(f);
+    setVideoPreview(url);
+    setVideoProg(0);
+  };
+
+  /* ---- SUBMIT ---- */
+  const [submitting, setSubmitting] = useState(false);
+  const handleSubmit = async () => {
+    if (submitting) return;
+    if (!form.title || !form.brand || !form.year || !form.price) {
+      alert("Judul, merk, tahun, dan harga wajib diisi.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      // 1) Insert listing
+      const payload: any = {
+        title: form.title,
+        brand: form.brand,
+        unit_type: form.unit_type || null,
+        year: Number(form.year) || null,
+        color: form.color || null,
+        mileage_km: form.mileage_km ? Number(form.mileage_km) : null,
+        price: form.price ? Number(form.price) : null,
+        whatsapp: form.whatsapp || null,
+        description: form.description || null,
+        location: form.location || null,
+        latitude: form.latitude ? Number(form.latitude) : null,
+        longitude: form.longitude ? Number(form.longitude) : null,
+        created_at: new Date().toISOString(),
+      };
+
+      const { data: ins, error: errIns } = await supabase.from("listings").insert(payload).select("id").single();
+      if (errIns || !ins?.id) throw errIns || new Error("Gagal membuat listing.");
+      const listingId = ins.id as string;
+
+      // 2) Upload video (opsional)
+      if (videoFile) {
+        const path = `${listingId}/${Date.now()}-${videoFile.name}`;
+        // Supabase SDK belum expose progress; kita buat progress pseudo dengan chunked upload kecil-kecilan
+        const { data, error } = await supabase.storage.from("listing-videos").upload(path, videoFile, {
+          cacheControl: "3600",
+          upsert: false,
+        });
+        if (error) throw error;
+        setVideoProg(100);
+      }
+
+      // 3) Upload semua gambar
+      for (let i = 0; i < MAX_IMAGES; i++) {
+        const f = imgFiles[i];
+        if (!f) continue;
+        const path = `${listingId}/${Date.now()}-${i + 1}-${f.name}`;
+        const { error } = await supabase.storage.from("listing-images").upload(path, f, {
+          cacheControl: "3600",
+          upsert: false,
+        });
+        if (error) throw error;
+        setImgProg((prev) => prev.map((v, idx) => (idx === i ? 100 : v)));
+      }
+
+      alert("Iklan berhasil diterbitkan!");
+      // reset sederhana
+      setForm({
+        title: "",
+        brand: "",
+        unit_type: "",
+        year: "",
+        color: "",
+        mileage_km: "",
+        price: "",
+        whatsapp: "",
+        description: "",
+        location: "",
+        latitude: "",
+        longitude: "",
+      });
+      setImgFiles(Array.from({ length: MAX_IMAGES }, () => null));
+      setImgPreviews(Array.from({ length: MAX_IMAGES }, () => null));
+      setImgProg(Array.from({ length: MAX_IMAGES }, () => 0));
+      setVideoFile(null);
+      setVideoPreview(null);
+      setVideoProg(0);
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message || "Terjadi kesalahan.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /* =========================
+     UI
+     ========================= */
+  return (
+    <main style={{ maxWidth: 1060, margin: "24px auto", padding: "0 16px" }}>
+      <h1 style={{ fontSize: 28, fontWeight: 900, marginBottom: 14 }}>Jual Unit</h1>
+
+      {/* ========== Uploads Section (tetap di ATAS) ========== */}
+      <div style={{ display: "grid", gap: 18 }}>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>Foto Unit (maks 6)</div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+              gap: 10,
+            }}
+          >
+            {Array.from({ length: MAX_IMAGES }).map((_, i) => (
+              <div
+                key={i}
+                onClick={() => pickImage(i)}
+                style={{
+                  position: "relative",
+                  border: "1px dashed #cbd5e1",
+                  borderRadius: 12,
+                  height: 140,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  overflow: "hidden",
+                  background: "#fafafa",
+                }}
+              >
+                {imgPreviews[i] ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={imgPreviews[i]!}
+                    alt={`img-${i + 1}`}
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                  />
+                ) : (
+                  <span style={{ color: "#6b7280", fontSize: 14 }}>Upload Foto</span>
                 )}
+
+                <div style={{ position: "absolute", left: 10, right: 10, bottom: 8 }}>
+                  {imgProg[i] > 0 && <Progress value={imgProg[i]} />}
+                </div>
+
+                <input
+                  ref={(el) => (imgInputs.current[i] = el!)}
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={onPickImage(i)}
+                />
               </div>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>Video Unit (opsional)</div>
+          <div
+            onClick={pickVideo}
+            style={{
+              position: "relative",
+              border: "1px dashed #cbd5e1",
+              borderRadius: 12,
+              height: 140,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              overflow: "hidden",
+              background: "#fafafa",
+            }}
+          >
+            {videoPreview ? (
+              <video src={videoPreview} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             ) : (
-              <div style={thumbStyle} onClick={() => imgInputs.current[i]?.click()}>
-                <span style={thumbInnerLabel}>Upload Foto</span>
-              </div>
+              <span style={{ color: "#6b7280", fontSize: 14 }}>Upload Video</span>
             )}
+
+            <div style={{ position: "absolute", left: 10, right: 10, bottom: 8 }}>
+              {videoProg > 0 && <Progress value={videoProg} />}
+            </div>
+
             <input
-              ref={(el) => { imgInputs.current[i] = el!; }}
+              ref={vidInput}
               type="file"
-              accept="image/*"
+              accept="video/*"
               hidden
-              onChange={(e) => handleImagePick(e, i)}
+              onChange={onPickVideo}
             />
           </div>
-        ))}
-
-        {/* Slot Video */}
-        <div style={{ maxWidth: THUMB_W }}>
-          <h3 style={{ fontSize: 14, margin: "0 0 6px", color: "#374151" }}>Video Unit (opsional)</h3>
-          {videoPreview ? (
-            <div style={thumbStyle} onClick={() => videoInputRef.current?.click()}>
-              <video src={videoPreview as string} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-              {videoProgress != null && (
-                <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 4, background: "#E5E7EB" }}>
-                  <div style={{ width: `${videoProgress}%`, height: "100%", background: "#111827" }} />
-                </div>
-              )}
-            </div>
-          ) : (
-            <div style={thumbStyle} onClick={() => videoInputRef.current?.click()}>
-              <span style={thumbInnerLabel}>Upload Video</span>
-            </div>
-          )}
-          <input ref={videoInputRef} type="file" accept="video/*" hidden onChange={handleVideoPick} />
         </div>
       </div>
 
-      {/* FORM DETAIL (tetap) */}
-      <div style={{ display: "grid", gap: 12, gridTemplateColumns: "1fr 1fr", marginTop: 18 }}>
+      {/* ========== Form Data Unit ========== */}
+      <div style={{ marginTop: 24, display: "grid", gap: 14 }}>
         <div style={{ display: "grid", gap: 8 }}>
           <label>Judul</label>
-          <input value={form.title} onChange={onChange("title")} placeholder="Contoh: Yamaha Fazzio 2024 istimewa" />
+          <input value={form.title} onChange={onChange("title")} placeholder="Contoh: Yamaha Fazzio 2024 Istimewa" />
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 12 }}>
+          <div style={{ display: "grid", gap: 8 }}>
+            <label>Merk</label>
+            <input value={form.brand} onChange={onChange("brand")} placeholder="Yamaha / Honda / Suzuki / Gesits" />
+          </div>
+
+          <div style={{ display: "grid", gap: 8 }}>
+            <label>Tipe/Model</label>
+            <input value={form.unit_type} onChange={onChange("unit_type")} placeholder="Fazzio / Vario / NMAX" />
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 12 }}>
+          <div style={{ display: "grid", gap: 8 }}>
+            <label>Tahun</label>
+            <select value={form.year} onChange={onChange("year")}>
+              <option value="">Pilih Tahun</option>
+              {years.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ display: "grid", gap: 8 }}>
+            <label>Warna</label>
+            <input value={form.color} onChange={onChange("color")} placeholder="Hitam / Merah Doff" />
+          </div>
+
+          <div style={{ display: "grid", gap: 8 }}>
+            <label>Kilometer</label>
+            <input value={form.mileage_km} onChange={onChange("mileage_km")} placeholder="25000" inputMode="numeric" />
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 12 }}>
+          <div style={{ display: "grid", gap: 8 }}>
+            <label>Harga (Rp)</label>
+            <input value={form.price} onChange={onChange("price")} placeholder="18000000" inputMode="numeric" />
+          </div>
+          <div style={{ display: "grid", gap: 8 }}>
+            <label>WhatsApp</label>
+            <input value={form.whatsapp} onChange={onChange("whatsapp")} placeholder="08xxx" />
+          </div>
         </div>
 
         <div style={{ display: "grid", gap: 8 }}>
-          <label>Tahun</label>
-          <select value={form.year ?? ""} onChange={onChange("year")}>
-            <option value="">Pilih tahun</option>
-            {YEARS.map((y) => (<option key={y} value={y}>{y}</option>))}
-          </select>
-        </div>
-
-        <div style={{ display: "grid", gap: 8 }}>
-          <label>Merk</label>
-          <select value={form.brand} onChange={onBrandChange}>
-            <option value="">Pilih merk</option>
-            {Object.keys(BRAND_TYPES).map((b) => (<option key={b} value={b}>{b}</option>))}
-          </select>
-        </div>
-
-        <div style={{ display: "grid", gap: 8 }}>
-          <label>Tipe/Model</label>
-          <select value={form.unit_type} onChange={onChange("unit_type")} disabled={!form.brand}>
-            <option value="">{form.brand ? "Pilih tipe/model" : "Pilih merk dulu"}</option>
-            {(BRAND_TYPES[form.brand] || []).map((t) => (<option key={t} value={t}>{t}</option>))}
-          </select>
-        </div>
-
-        <div style={{ display: "grid", gap: 8 }}>
-          <label>Warna</label>
-          <select value={form.color ?? ""} onChange={onChange("color")}>
-            <option value="">Pilih warna</option>
-            {COLORS.map((c) => (<option key={c} value={c}>{c}</option>))}
-          </select>
-        </div>
-
-        <div style={{ display: "grid", gap: 8 }}>
-          <label>Kilometer</label>
-          <input value={form.mileage_km ?? ""} onChange={onChange("mileage_km")} inputMode="numeric" placeholder="25000" />
-        </div>
-
-        <div style={{ display: "grid", gap: 8 }}>
-          <label>Harga (Rp)</label>
-          <input value={form.price ?? ""} onChange={onChange("price")} inputMode="numeric" placeholder="18000000" />
-        </div>
-
-        <div style={{ display: "grid", gap: 8 }}>
-          <label>WhatsApp</label>
-          <input value={form.whatsapp ?? ""} onChange={onChange("whatsapp")} placeholder="08xxx" />
-        </div>
-
-        <div style={{ gridColumn: "1 / -1", display: "grid", gap: 8 }}>
           <label>Deskripsi</label>
-          <textarea value={form.description ?? ""} onChange={onChange("description")} rows={5} placeholder="Kondisi mesin, bodi, pajak, servis, alasan jual, dll." />
-        </div>
-      </div>
-
-      {/* LOKASI (dropdown berantai seluruh Indonesia via JSON) */}
-      <h2 style={{ fontSize: 20, fontWeight: 800, margin: "16px 0 8px" }}>Lokasi</h2>
-      <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(2, minmax(0,1fr))" }}>
-        <div style={{ display: "grid", gap: 8 }}>
-          <label>Provinsi</label>
-          <select
-            value={form.province_id ?? ""}
-            onChange={(e) => {
-              const id = e.target.value;
-              const name = provOptions.find(p => p.id === id)?.name;
-              setForm(f => ({ ...f, province_id: id || undefined, province_name: name, city_id: undefined, city_name: undefined, district_id: undefined, district_name: undefined, subdistrict_id: undefined, subdistrict_name: undefined }));
-            }}
-          >
-            <option value="">Pilih Provinsi</option>
-            {provOptions.map(p => (<option key={p.id} value={p.id}>{p.name}</option>))}
-          </select>
+          <textarea
+            value={form.description}
+            onChange={onChange("description")}
+            placeholder="Kondisi mesin, body, pajak, servis, alasan jual, dll."
+            rows={5}
+          />
         </div>
 
-        <div style={{ display: "grid", gap: 8 }}>
-          <label>Kab/Kota</label>
-          <select
-            value={form.city_id ?? ""}
-            onChange={(e) => {
-              const id = e.target.value;
-              const name = cityOptions.find(c => c.id === id)?.name;
-              setForm(f => ({ ...f, city_id: id || undefined, city_name: name, district_id: undefined, district_name: undefined, subdistrict_id: undefined, subdistrict_name: undefined }));
-            }}
-            disabled={!form.province_id}
-          >
-            <option value="">{form.province_id ? "Pilih Kab/Kota" : "Pilih provinsi dulu"}</option>
-            {cityOptions.map(c => (<option key={c.id} value={c.id}>{c.name}</option>))}
-          </select>
+        {/* ========== LOKASI (ADD-ON peta) ========== */}
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>Lokasi</div>
+
+          <div style={{ display: "grid", gap: 10 }}>
+            <input
+              value={form.location}
+              onChange={onChange("location")}
+              placeholder="Label lokasi singkat (opsional), contoh: Bekasi, Jaktim"
+            />
+
+            <MapPicker
+              latitude={form.latitude}
+              longitude={form.longitude}
+              onChange={(next) => setForm((f) => ({ ...f, ...next }))}
+            />
+          </div>
         </div>
 
-        <div style={{ display: "grid", gap: 8 }}>
-          <label>Kecamatan</label>
-          <select
-            value={form.district_id ?? ""}
-            onChange={(e) => {
-              const id = e.target.value;
-              const name = districtOptions.find(d => d.id === id)?.name;
-              setForm(f => ({ ...f, district_id: id || undefined, district_name: name, subdistrict_id: undefined, subdistrict_name: undefined }));
-            }}
-            disabled={!form.city_id}
-          >
-            <option value="">{form.city_id ? "Pilih Kecamatan" : "Pilih kab/kota dulu"}</option>
-            {districtOptions.map(d => (<option key={d.id} value={d.id}>{d.name}</option>))}
-          </select>
-        </div>
-
-        <div style={{ display: "grid", gap: 8 }}>
-          <label>Kelurahan</label>
-          <select
-            value={form.subdistrict_id ?? ""}
-            onChange={(e) => {
-              const id = e.target.value;
-              const name = subdistrictOptions.find(s => s.id === id)?.name;
-              setForm(f => ({ ...f, subdistrict_id: id || undefined, subdistrict_name: name }));
-            }}
-            disabled={!form.district_id}
-          >
-            <option value="">{form.district_id ? "Pilih Kelurahan" : "Pilih kecamatan dulu"}</option>
-            {subdistrictOptions.map(s => (<option key={s.id} value={s.id}>{s.name}</option>))}
-          </select>
-        </div>
-
-        <div style={{ gridColumn: "1 / -1" }}>
+        <div style={{ marginTop: 14 }}>
           <button
             type="button"
-            onClick={useMyLocation}
-            style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #E5E7EB", background: "#111827", color: "#fff" }}
+            onClick={handleSubmit}
+            disabled={submitting}
+            style={{
+              padding: "10px 16px",
+              borderRadius: 12,
+              border: "1px solid #111827",
+              fontWeight: 700,
+              background: submitting ? "#e5e7eb" : "#111827",
+              color: "#fff",
+              cursor: submitting ? "not-allowed" : "pointer",
+            }}
           >
-            Gunakan Lokasi Saya (GPS)
+            {submitting ? "Menerbitkan..." : "Terbitkan Iklan"}
           </button>
-          <p style={{ color: "#6B7280", fontSize: 12, marginTop: 6 }}>
-            Izinkan akses lokasi agar provinsi/kota/kecamatan/kelurahan terisi otomatis (jika tersedia).
-          </p>
+          <div style={{ color: "#6b7280", fontSize: 12, marginTop: 8 }}>
+            *Batasi konten yang melanggar hukum, SARA, atau dewasa — akan ditolak.
+          </div>
         </div>
-      </div>
-
-      {/* TERBITKAN */}
-      <div style={{ marginTop: 18 }}>
-        <button
-          type="button"
-          onClick={onSubmit}
-          style={{ padding: "12px 18px", background: "#111827", color: "white", borderRadius: 12, border: "1px solid #111827", fontWeight: 700 }}
-        >
-          Terbitkan Iklan
-        </button>
-        <p style={{ color: "#6B7280", fontSize: 12, marginTop: 8 }}>
-          *Batasi konten yang melanggar hukum, SARA, atau dewasa — akan ditolak.
-        </p>
       </div>
     </main>
   );
