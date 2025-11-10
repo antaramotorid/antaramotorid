@@ -62,22 +62,9 @@ const COLORS = [
   "Lainnya",
 ];
 
-/** ========== DATA WILAYAH (SAMPLE TERSTRUKTUR) ==========
- * Mekanisme dropdown berantai siap; cukup tambah struktur REGIONS
- * jika ingin meliputi seluruh Indonesia (bisa kita lanjutkan bertahap).
- */
-type Regions = Record<
-  string, // Provinsi
-  Record<
-    string, // Kota/Kab
-    Record<
-      string, // Kecamatan
-      string[] // Kelurahan
-    >
-  >
->;
+/** ========== DATA WILAYAH (SAMPLE TERSTRUKTUR) ========== */
+type Regions = Record<string, Record<string, Record<string, string[]>>>;
 
-// Contoh data awal (DKI & Jabar — termasuk Bekasi, Depok, Bogor, Bandung)
 const REGIONS: Regions = {
   "DKI Jakarta": {
     "Jakarta Timur": {
@@ -96,16 +83,16 @@ const REGIONS: Regions = {
       "Bekasi Barat": ["Bintara", "Jakasampurna", "Kranji"],
     },
     Depok: {
-      "Beji": ["Kukusan", "Kemiri Muka", "Beji"],
-      "Sukmajaya": ["Cisalak", "Mekar Jaya", "Abadijaya"],
+      Beji: ["Kukusan", "Kemiri Muka", "Beji"],
+      Sukmajaya: ["Cisalak", "Mekar Jaya", "Abadijaya"],
     },
     Bogor: {
       "Bogor Utara": ["Cibuluh", "Tegal Gundil", "Bantarjati"],
       "Bogor Selatan": ["Empang", "Ranggamekar", "Batu Tulis"],
     },
     Bandung: {
-      "Coblong": ["Dago", "Lebak Gede", "Lebak Siliwangi"],
-      "Kiaracondong": ["Sukapura", "Gumuruh", "Kebon Jayanti"],
+      Coblong: ["Dago", "Lebak Gede", "Lebak Siliwangi"],
+      Kiaracondong: ["Sukapura", "Gumuruh", "Kebon Jayanti"],
     },
   },
 };
@@ -119,7 +106,6 @@ async function reverseGeocode(lat: number, lon: number) {
   if (!res.ok) throw new Error("Reverse geocoding gagal");
   const data = await res.json();
   const addr = data?.address || {};
-  // Normalisasi beberapa field
   return {
     province:
       addr.state || addr.region || addr.province || addr.county || addr["ISO3166-2-lvl4"] || addr["state_district"],
@@ -148,13 +134,11 @@ type Form = {
   whatsapp?: string;
   description?: string;
 
-  // Lokasi terstruktur
   province?: string;
   city?: string;
   district?: string;
   subdistrict?: string;
 
-  // koordinat disimpan internal (tanpa input)
   latitude?: number | null;
   longitude?: number | null;
 };
@@ -170,12 +154,10 @@ export default function SellPage() {
     price: undefined,
     whatsapp: "",
     description: "",
-
     province: undefined,
     city: undefined,
     district: undefined,
     subdistrict: undefined,
-
     latitude: null,
     longitude: null,
   });
@@ -214,10 +196,17 @@ export default function SellPage() {
     (key: keyof Form) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
       const value = e.target.value;
-      setForm((f) => ({ ...f, [key]: key === "year" ? Number(value) : key === "price" || key === "mileage_km" ? Number(value) : value }));
+      setForm((f) => ({
+        ...f,
+        [key]:
+          key === "year"
+            ? Number(value)
+            : key === "price" || key === "mileage_km"
+            ? Number(value)
+            : value,
+      }));
     };
 
-  // Brand -> reset type
   const onBrandChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const brand = e.target.value;
     setForm((f) => ({ ...f, brand, unit_type: "" }));
@@ -254,17 +243,9 @@ export default function SellPage() {
         const lat = pos.coords.latitude;
         const lon = pos.coords.longitude;
         setForm((f) => ({ ...f, latitude: lat, longitude: lon }));
-
         try {
           const addr = await reverseGeocode(lat, lon);
-
-          // Pastikan opsi ada di dropdown (kalau belum ada, kita sisipkan sementara)
-          const ensureOption = <T extends string>(arr: T[], value?: T) =>
-            value && !arr.includes(value) ? [value as T, ...arr] : arr;
-
-          // Sisipkan ke dataset runtime (tidak mengubah REGIONS asli)
           if (addr.province) {
-            // set langsung, dan biarkan dropdown terisi value ini (walau belum ada di REGIONS)
             setForm((f) => ({
               ...f,
               province: addr.province || f.province,
@@ -287,7 +268,6 @@ export default function SellPage() {
 
   /** Submit */
   const onSubmit = async () => {
-    // Validasi ringan
     if (!form.title) return alert("Judul wajib diisi.");
     if (!form.brand) return alert("Pilih merk.");
     if (!form.unit_type) return alert("Pilih tipe/model.");
@@ -295,7 +275,6 @@ export default function SellPage() {
     if (!form.price) return alert("Isi harga.");
     if (!form.province || !form.city) return alert("Lengkapi lokasi minimal Provinsi & Kab/Kota.");
 
-    // 1) Insert listing
     const payload = {
       title: form.title,
       brand: form.brand,
@@ -306,12 +285,10 @@ export default function SellPage() {
       price: form.price,
       whatsapp: form.whatsapp || null,
       description: form.description || null,
-
       province: form.province || null,
       city: form.city || null,
       district: form.district || null,
       subdistrict: form.subdistrict || null,
-
       latitude: form.latitude ?? null,
       longitude: form.longitude ?? null,
       created_at: new Date().toISOString(),
@@ -325,8 +302,7 @@ export default function SellPage() {
     }
     const listingId: string = inserted.id;
 
-    // 2) Upload media
-    // Foto
+    // Upload foto
     for (let i = 0; i < imageFiles.length; i++) {
       const file = imageFiles[i];
       if (!file) continue;
@@ -336,16 +312,10 @@ export default function SellPage() {
           n[i] = 0;
           return n;
         });
-
-        // Pakai bucket prioritas "listing-images"
         const path = `${listingId}/${Date.now()}-${i}-${file.name}`;
         const { error: upErr } = await supabase.storage
           .from("listing-images")
-          .upload(path, file, {
-            cacheControl: "3600",
-            upsert: false,
-          });
-
+          .upload(path, file, { cacheControl: "3600", upsert: false });
         if (upErr) throw upErr;
         setImgProgress((p) => {
           const n = [...p];
@@ -362,15 +332,14 @@ export default function SellPage() {
       }
     }
 
-    // Video (opsional)
+    // Upload video (opsional)
     if (videoFile) {
       try {
         setVideoProgress(0);
         const vpath = `${listingId}/${Date.now()}-${videoFile.name}`;
-        const { error: vErr } = await supabase.storage.from("listing-videos").upload(vpath, videoFile, {
-          cacheControl: "3600",
-          upsert: false,
-        });
+        const { error: vErr } = await supabase.storage
+          .from("listing-videos")
+          .upload(vpath, videoFile, { cacheControl: "3600", upsert: false });
         if (vErr) throw vErr;
         setVideoProgress(100);
       } catch (e) {
@@ -380,7 +349,6 @@ export default function SellPage() {
     }
 
     alert("Iklan berhasil diterbitkan!");
-    // Reset ringan
     setForm((f) => ({ ...f, title: "", description: "", price: undefined }));
     setImageFiles(Array(6).fill(null));
     setImagePreviews(Array(6).fill(null));
@@ -419,7 +387,9 @@ export default function SellPage() {
               </div>
             )}
             <input
-              ref={(el) => (imgInputs.current[i] = el!)}
+              ref={(el) => {
+                imgInputs.current[i] = el!;
+              }}
               type="file"
               accept="image/*"
               hidden
@@ -562,7 +532,6 @@ export default function SellPage() {
                 {p}
               </option>
             ))}
-            {/* Jika hasil GPS bukan daftar, tetap tampil */}
             {form.province && !provinces.includes(form.province) && (
               <option value={form.province}>{form.province}</option>
             )}
