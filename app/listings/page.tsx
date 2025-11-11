@@ -1,127 +1,118 @@
-// app/listings/page.tsx
+"use client";
+
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "../../lib/supabaseClient";
 
-/** Ambil 1 foto pertama untuk sebuah listingId dari bucket yang tersedia */
-async function getFirstImageUrl(listingId: string): Promise<string | null> {
-  const buckets = ["listing-images", "listing_image", "listing_images"];
-  for (const bucket of buckets) {
-    const { data: files, error } = await supabase.storage.from(bucket).list(listingId, { limit: 50 });
-    if (error || !files?.length) continue;
+export type MediaItem = { type: "image" | "video"; url: string };
+export type Listing = {
+  id: string;
+  title: string;
+  brand: string;
+  type: string;
+  year: number;
+  color: string;
+  mileage: number;
+  price: number;
+  location: string;
+  description: string;
+  created_at: string;
+  media?: MediaItem[];
+};
 
-    // cari file gambar
-    const img = files.find((f) =>
-      /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name)
-    );
-    if (!img) continue;
+export default function ListingsPage() {
+  const [listings, setListings] = useState<Listing[]>([]);
+  const [loading, setLoading] = useState(true);
 
-    const path = `${listingId}/${img.name}`;
-    const { data } = supabase.storage.from(bucket).getPublicUrl(path);
-    if (data?.publicUrl) return data.publicUrl;
+  useEffect(() => {
+    fetchListings();
+  }, []);
+
+  async function fetchListings() {
+    try {
+      setLoading(true);
+      // Ambil data listing + media terkait
+      const { data: listingsData, error: listingsError } = await supabase
+        .from("listings")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (listingsError) throw listingsError;
+
+      const { data: mediaData, error: mediaError } = await supabase
+        .from("media")
+        .select("*");
+
+      if (mediaError) throw mediaError;
+
+      // Gabungkan media ke listing
+      const combined = listingsData.map((listing) => ({
+        ...listing,
+        media: mediaData.filter((m) => m.listing_id === listing.id),
+      }));
+
+      setListings(combined);
+    } catch (err: any) {
+      console.error("Gagal mengambil listing:", err.message);
+    } finally {
+      setLoading(false);
+    }
   }
-  return null;
-}
 
-function rp(n: any) {
-  if (typeof n !== "number") return "—";
-  return new Intl.NumberFormat("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0,
-  }).format(n);
-}
-
-export default async function ListingsPage() {
-  // Ambil list terbaru
-  const { data: listings } = await supabase
-    .from("listings")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(24);
-
-  // Ambil thumbnail paralel
-  const thumbs = await Promise.all(
-    (listings ?? []).map((l) => getFirstImageUrl(l.id))
-  );
+  function formatPrice(num: number) {
+    if (!num) return "-";
+    return "Rp " + num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  }
 
   return (
-    <main style={{ maxWidth: 1100, margin: "40px auto", padding: "0 16px" }}>
-      <h1 style={{ fontSize: 32, fontWeight: 900, marginBottom: 18 }}>Listing Terbaru</h1>
+    <div className="max-w-5xl mx-auto p-4">
+      <h1 className="text-2xl font-bold mb-6 text-gray-800">
+        Daftar Iklan Terbaru
+      </h1>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-          gap: 18,
-        }}
-      >
-        {(listings ?? []).map((l, i) => {
-          const img = thumbs[i];
-          return (
-            <Link
-              key={l.id}
-              href={`/listings/${l.id}`}
-              style={{
-                display: "block",
-                border: "1px solid #e5e7eb",
-                borderRadius: 16,
-                padding: 12,
-                textDecoration: "none",
-                color: "inherit",
-                background: "#fff",
-              }}
-            >
-              <div
-                style={{
-                  width: "100%",
-                  aspectRatio: "4/3",
-                  borderRadius: 12,
-                  overflow: "hidden",
-                  background: "#f3f4f6",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
+      {loading ? (
+        <p>Memuat data...</p>
+      ) : listings.length === 0 ? (
+        <p className="text-gray-500">Belum ada iklan.</p>
+      ) : (
+        <div className="grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          {listings.map((listing) => {
+            const firstImage =
+              listing.media?.find((m) => m.type === "image")?.url ||
+              listing.media?.[0]?.url ||
+              "https://placehold.co/400x300?text=No+Image";
+
+            return (
+              <Link
+                key={listing.id}
+                href={`/listings/${listing.id}`}
+                className="block border rounded-lg shadow-sm hover:shadow-md transition overflow-hidden bg-white"
               >
-                {img ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={img}
-                    alt={l.title ?? "Unit"}
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                  />
-                ) : (
-                  <span style={{ color: "#9ca3af" }}>Tidak ada foto</span>
-                )}
-              </div>
-
-              <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 20, fontWeight: 800, textTransform: "uppercase" }}>
-                  {l.title ?? "Unit"}
+                <img
+                  src={firstImage}
+                  alt={listing.title}
+                  className="w-full h-48 object-cover"
+                />
+                <div className="p-3">
+                  <h2 className="font-semibold text-gray-800 truncate">
+                    {listing.title}
+                  </h2>
+                  <p className="text-sm text-gray-600">
+                    {listing.brand} {listing.type}
+                  </p>
+                  <p className="text-green-700 font-semibold mt-1">
+                    {formatPrice(listing.price)}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {listing.year} • {listing.mileage} KM
+                  </p>
+                  <p className="text-xs text-gray-500">{listing.location}</p>
                 </div>
-                <div style={{ color: "#6b7280", marginTop: 2, textTransform: "uppercase", fontSize: 12, letterSpacing: 0.3 }}>
-                  {(l.brand || "") + (l.year ? ` • ${l.year}` : "") + (l.location ? ` • ${l.location}` : "")}
-                </div>
-                <div style={{ fontSize: 18, fontWeight: 800, marginTop: 8 }}>{rp(l.price)}</div>
-
-                {/* Tambahan: Warna • Tipe • KM */}
-                <div style={{ marginTop: 6, fontSize: 13, color: "#374151" }}>
-                  <span><b>Warna:</b> {l.color || "—"}</span>
-                  {" • "}
-                  <span><b>Tipe:</b> {l.unit_type || "—"}</span>
-                  {" • "}
-                  <span>
-                    <b>KM:</b>{" "}
-                    {typeof l.mileage_km === "number"
-                      ? l.mileage_km.toLocaleString("id-ID")
-                      : "—"}
-                  </span>
-                </div>
-              </div>
-            </Link>
-          );
-        })}
-      </div>
-    </main>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
