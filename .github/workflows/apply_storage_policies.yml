@@ -1,11 +1,13 @@
+# trigger
 name: Apply Supabase Storage Policies
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # memungkinkan tombol "Run workflow" muncul di tab Actions
 
 jobs:
   apply-policies:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
