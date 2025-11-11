@@ -3,30 +3,26 @@
 import React, { useState } from "react";
 import { supabase } from "../../lib/supabaseClient";
 
-type MediaItem = {
-  type: "image" | "video";
-  url: string;
-};
+export type MediaItem = { type: "image" | "video"; url: string };
 
 export default function SellPage() {
-  const [images, setImages] = useState<File[]>([]);
-  const [video, setVideo] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState(0);
   const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [price, setPrice] = useState("");
   const [brand, setBrand] = useState("");
   const [type, setType] = useState("");
   const [year, setYear] = useState("");
   const [color, setColor] = useState("");
   const [mileage, setMileage] = useState("");
+  const [price, setPrice] = useState("");
+  const [description, setDescription] = useState("");
   const [location, setLocation] = useState("");
+
+  const [images, setImages] = useState<File[]>([]);
+  const [video, setVideo] = useState<File | null>(null);
+  const [progress, setProgress] = useState<number>(0);
+  const [uploading, setUploading] = useState(false);
   const [mediaUrls, setMediaUrls] = useState<MediaItem[]>([]);
 
-  // =====================================
-  // ✅ Fungsi Upload ke Supabase Storage
-  // =====================================
+  // ========== Upload Media ke Supabase ==========
   async function uploadMedia(file: File, type: "image" | "video") {
     const bucket = type === "image" ? "listing-images" : "listing-videos";
     const fileExt = file.name.split(".").pop();
@@ -37,10 +33,7 @@ export default function SellPage() {
 
     const { error: uploadError } = await supabase.storage
       .from(bucket)
-      .upload(filePath, file, {
-        cacheControl: "3600",
-        upsert: false,
-      });
+      .upload(filePath, file, { cacheControl: "3600", upsert: false });
 
     if (uploadError) throw uploadError;
 
@@ -48,23 +41,18 @@ export default function SellPage() {
     return data.publicUrl;
   }
 
-  // =====================================
-  // ✅ Handle Upload Semua Media
-  // =====================================
-  async function handleUpload() {
+  async function handleUploadAll() {
     try {
       if (images.length === 0 && !video) {
-        alert("Unggah minimal 1 gambar atau video.");
+        alert("Upload minimal 1 foto atau video");
         return;
       }
       setUploading(true);
       setProgress(0);
-
-      const uploaded: MediaItem[] = [];
       const total = images.length + (video ? 1 : 0);
       let done = 0;
+      const uploaded: MediaItem[] = [];
 
-      // Upload semua gambar
       for (const img of images) {
         const url = await uploadMedia(img, "image");
         uploaded.push({ type: "image", url });
@@ -72,7 +60,6 @@ export default function SellPage() {
         setProgress(Math.round((done / total) * 100));
       }
 
-      // Upload video (jika ada)
       if (video) {
         const url = await uploadMedia(video, "video");
         uploaded.push({ type: "video", url });
@@ -81,25 +68,44 @@ export default function SellPage() {
       }
 
       setMediaUrls(uploaded);
-      alert("✅ Semua media berhasil diunggah.");
+      alert("✅ Semua media berhasil diunggah!");
     } catch (error: any) {
+      alert("❌ Upload gagal: " + error.message);
       console.error(error);
-      alert("❌ Gagal mengunggah media: " + error.message);
     } finally {
       setUploading(false);
     }
   }
 
-  // =====================================
-  // ✅ Render Upload Section (6 foto + 1 video)
-  // =====================================
+  // ========== Submit Form ==========
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const payload = {
+      title,
+      brand,
+      type,
+      year,
+      color,
+      mileage,
+      price,
+      description,
+      location,
+      media: mediaUrls,
+    };
+    console.log("Kirim data iklan:", payload);
+    alert("Data iklan siap dikirim (cek console).");
+  }
+
+  // ========== Render ==========
   return (
     <div className="max-w-3xl mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">Jual Kendaraan</h1>
+      <h1 className="text-2xl font-bold mb-4 text-gray-800">
+        Jual Motor Bekas
+      </h1>
 
       {/* Upload Section */}
-      <div className="mb-4 border rounded-lg p-4 bg-gray-50">
-        <label className="font-semibold block mb-2">Upload Foto (maks. 6)</label>
+      <div className="bg-gray-50 border rounded-xl p-4 mb-6 shadow-sm">
+        <p className="font-semibold mb-2">Upload Foto (maks. 6)</p>
         <input
           type="file"
           accept="image/*"
@@ -107,60 +113,50 @@ export default function SellPage() {
           onChange={(e) => {
             const files = e.target.files ? Array.from(e.target.files) : [];
             if (files.length > 6) {
-              alert("Maksimal 6 foto.");
+              alert("Maksimal 6 foto");
               return;
             }
             setImages(files);
           }}
+          className="block mb-4"
         />
-        <label className="font-semibold block mt-4 mb-2">
-          Upload Video (maks. 1)
-        </label>
+        <p className="font-semibold mb-2">Upload Video (opsional, maks. 1)</p>
         <input
           type="file"
           accept="video/*"
           onChange={(e) => setVideo(e.target.files?.[0] || null)}
+          className="block"
         />
         {uploading && (
           <div className="mt-4">
-            <p>Uploading... {progress}%</p>
-            <div className="w-full bg-gray-200 rounded-full h-2">
+            <p>Progress upload: {progress}%</p>
+            <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
               <div
-                className="bg-green-500 h-2 rounded-full"
+                className="bg-green-500 h-2 rounded-full transition-all"
                 style={{ width: `${progress}%` }}
               ></div>
             </div>
           </div>
         )}
         <button
-          onClick={handleUpload}
+          onClick={handleUploadAll}
           disabled={uploading}
-          className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg"
+          className="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
         >
           {uploading ? "Mengunggah..." : "Upload Sekarang"}
         </button>
       </div>
 
       {/* Form Info Kendaraan */}
-      <div className="space-y-3">
+      <form
+        onSubmit={handleSubmit}
+        className="bg-white border rounded-xl p-4 shadow-sm space-y-3"
+      >
         <input
           className="w-full border p-2 rounded"
           placeholder="Judul Iklan"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-        />
-        <textarea
-          className="w-full border p-2 rounded"
-          placeholder="Deskripsi"
-          rows={3}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
-        <input
-          className="w-full border p-2 rounded"
-          placeholder="Harga"
-          value={price}
-          onChange={(e) => setPrice(e.target.value)}
         />
         <input
           className="w-full border p-2 rounded"
@@ -203,31 +199,51 @@ export default function SellPage() {
         />
         <input
           className="w-full border p-2 rounded"
+          placeholder="Harga (Rp)"
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+        />
+        <input
+          className="w-full border p-2 rounded"
           placeholder="Lokasi"
           value={location}
           onChange={(e) => setLocation(e.target.value)}
         />
-      </div>
+        <textarea
+          className="w-full border p-2 rounded"
+          placeholder="Deskripsi"
+          rows={3}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
 
-      {/* Tampilkan URL Media yang diunggah */}
+        <button
+          type="submit"
+          className="w-full bg-green-600 text-white py-2 rounded-lg hover:bg-green-700"
+        >
+          Simpan Iklan
+        </button>
+      </form>
+
+      {/* Preview Media */}
       {mediaUrls.length > 0 && (
         <div className="mt-6">
-          <h2 className="font-semibold mb-2">Media Terunggah:</h2>
-          <div className="grid grid-cols-2 gap-2">
+          <h2 className="font-semibold mb-2 text-gray-700">Preview Media:</h2>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             {mediaUrls.map((m, i) =>
               m.type === "image" ? (
                 <img
                   key={i}
                   src={m.url}
                   alt="uploaded"
-                  className="w-full h-32 object-cover rounded"
+                  className="rounded-lg border h-40 w-full object-cover"
                 />
               ) : (
                 <video
                   key={i}
                   src={m.url}
                   controls
-                  className="w-full h-32 rounded"
+                  className="rounded-lg border h-40 w-full object-cover"
                 />
               )
             )}
