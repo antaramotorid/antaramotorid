@@ -1,20 +1,15 @@
-// app/layout.tsx
-import "../globals.css";
-import React from "react";
+import "./globals.css";
+import { ReactNode } from "react";
 
 export const metadata = {
   title: "AntaraMotorID",
-  description: "Marketplace - AntaraMotorID",
+  description: "Jual beli motor bekas dengan fitur upload foto dan video",
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="id">
-      <body className="bg-white text-gray-800 antialiased">
+      <body>
         {children}
       </body>
     </html>
