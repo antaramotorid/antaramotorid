@@ -1,276 +1,239 @@
 "use client";
 
-import React, { useRef, useState } from "react";
+import React, { useState } from "react";
 import { supabase } from "../../lib/supabaseClient";
 
-// 6 foto + 1 video upload dengan progress bar sederhana
+type MediaItem = {
+  type: "image" | "video";
+  url: string;
+};
+
 export default function SellPage() {
-  const [form, setForm] = useState({
-    title: "",
-    price: "",
-    brand: "",
-    unit_type: "",
-    year: new Date().getFullYear().toString(),
-    color: "",
-    mileage_km: "",
-    description: "",
-  });
+  const [images, setImages] = useState<File[]>([]);
+  const [video, setVideo] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [price, setPrice] = useState("");
+  const [brand, setBrand] = useState("");
+  const [type, setType] = useState("");
+  const [year, setYear] = useState("");
+  const [color, setColor] = useState("");
+  const [mileage, setMileage] = useState("");
+  const [location, setLocation] = useState("");
+  const [mediaUrls, setMediaUrls] = useState<MediaItem[]>([]);
 
-  const [imgPreviews, setImgPreviews] = useState<(string | null)[]>(Array(6).fill(null));
-  const [videoPreview, setVideoPreview] = useState<string | null>(null);
-  const [progress, setProgress] = useState<Record<string, string>>({});
+  // =====================================
+  // ✅ Fungsi Upload ke Supabase Storage
+  // =====================================
+  async function uploadMedia(file: File, type: "image" | "video") {
+    const bucket = type === "image" ? "listing-images" : "listing-videos";
+    const fileExt = file.name.split(".").pop();
+    const fileName = `${Date.now()}-${Math.random()
+      .toString(36)
+      .substring(2)}.${fileExt}`;
+    const filePath = `${fileName}`;
 
-  const imgInputs = useRef<(HTMLInputElement | null)[]>([]);
-  const videoInput = useRef<HTMLInputElement | null>(null);
+    const { error: uploadError } = await supabase.storage
+      .from(bucket)
+      .upload(filePath, file, {
+        cacheControl: "3600",
+        upsert: false,
+      });
 
-  function onChange(field: string) {
-    return (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-      setForm((f) => ({ ...f, [field]: e.target.value }));
-    };
+    if (uploadError) throw uploadError;
+
+    const { data } = supabase.storage.from(bucket).getPublicUrl(filePath);
+    return data.publicUrl;
   }
 
-  const handleImage = async (i: number, e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // =====================================
+  // ✅ Handle Upload Semua Media
+  // =====================================
+  async function handleUpload() {
+    try {
+      if (images.length === 0 && !video) {
+        alert("Unggah minimal 1 gambar atau video.");
+        return;
+      }
+      setUploading(true);
+      setProgress(0);
 
-    const preview = URL.createObjectURL(file);
-    setImgPreviews((p) => {
-      const n = [...p];
-      n[i] = preview;
-      return n;
-    });
+      const uploaded: MediaItem[] = [];
+      const total = images.length + (video ? 1 : 0);
+      let done = 0;
 
-    const path = `${crypto.randomUUID()}/${file.name}`;
-    setProgress((p) => ({ ...p, [`img-${i}`]: "Uploading..." }));
+      // Upload semua gambar
+      for (const img of images) {
+        const url = await uploadMedia(img, "image");
+        uploaded.push({ type: "image", url });
+        done++;
+        setProgress(Math.round((done / total) * 100));
+      }
 
-    const { error } = await supabase.storage.from("listing-images").upload(path, file);
-    if (error) setProgress((p) => ({ ...p, [`img-${i}`]: "Error" }));
-    else setProgress((p) => ({ ...p, [`img-${i}`]: "Done ✅" }));
-  };
+      // Upload video (jika ada)
+      if (video) {
+        const url = await uploadMedia(video, "video");
+        uploaded.push({ type: "video", url });
+        done++;
+        setProgress(Math.round((done / total) * 100));
+      }
 
-  const handleVideo = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const preview = URL.createObjectURL(file);
-    setVideoPreview(preview);
-
-    const path = `${crypto.randomUUID()}/${file.name}`;
-    setProgress((p) => ({ ...p, video: "Uploading..." }));
-
-    const { error } = await supabase.storage.from("listing-videos").upload(path, file);
-    if (error) setProgress((p) => ({ ...p, video: "Error" }));
-    else setProgress((p) => ({ ...p, video: "Done ✅" }));
-  };
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-
-    const { error } = await supabase.from("listings").insert({
-      ...form,
-      price: parseInt(form.price) || 0,
-      mileage_km: parseInt(form.mileage_km) || 0,
-      created_at: new Date().toISOString(),
-    });
-
-    if (error) alert("Gagal menyimpan: " + error.message);
-    else alert("Listing berhasil disimpan ✅");
+      setMediaUrls(uploaded);
+      alert("✅ Semua media berhasil diunggah.");
+    } catch (error: any) {
+      console.error(error);
+      alert("❌ Gagal mengunggah media: " + error.message);
+    } finally {
+      setUploading(false);
+    }
   }
 
+  // =====================================
+  // ✅ Render Upload Section (6 foto + 1 video)
+  // =====================================
   return (
-    <main style={{ maxWidth: 900, margin: "24px auto", padding: 16 }}>
-      <h2 style={{ fontWeight: 800, fontSize: 26 }}>Jual Motor</h2>
+    <div className="max-w-3xl mx-auto p-4">
+      <h1 className="text-2xl font-bold mb-4">Jual Kendaraan</h1>
 
       {/* Upload Section */}
-      <section style={{ marginTop: 16 }}>
-        <h3>Upload Foto (maks 6) & Video (1)</h3>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
-            gap: 12,
+      <div className="mb-4 border rounded-lg p-4 bg-gray-50">
+        <label className="font-semibold block mb-2">Upload Foto (maks. 6)</label>
+        <input
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={(e) => {
+            const files = e.target.files ? Array.from(e.target.files) : [];
+            if (files.length > 6) {
+              alert("Maksimal 6 foto.");
+              return;
+            }
+            setImages(files);
           }}
-        >
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div
-              key={i}
-              style={{
-                border: "1px dashed #ccc",
-                borderRadius: 10,
-                padding: 6,
-                textAlign: "center",
-              }}
-            >
+        />
+        <label className="font-semibold block mt-4 mb-2">
+          Upload Video (maks. 1)
+        </label>
+        <input
+          type="file"
+          accept="video/*"
+          onChange={(e) => setVideo(e.target.files?.[0] || null)}
+        />
+        {uploading && (
+          <div className="mt-4">
+            <p>Uploading... {progress}%</p>
+            <div className="w-full bg-gray-200 rounded-full h-2">
               <div
-                style={{
-                  height: 110,
-                  display: "grid",
-                  placeItems: "center",
-                  overflow: "hidden",
-                  borderRadius: 8,
-                  background: "#f9fafb",
-                }}
-              >
-                {imgPreviews[i] ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={imgPreviews[i]!}
-                    alt={`foto-${i}`}
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                  />
-                ) : (
-                  <span style={{ color: "#999" }}>Upload Foto</span>
-                )}
-              </div>
-
-              <div style={{ marginTop: 8, display: "flex", gap: 8, justifyContent: "center" }}>
-                <button type="button" onClick={() => imgInputs.current[i]?.click()}>
-                  Pilih
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setImgPreviews((p) => {
-                      const n = [...p];
-                      n[i] = null;
-                      return n;
-                    })
-                  }
-                >
-                  Hapus
-                </button>
-              </div>
-
-              <input
-                ref={(el) => {
-                  imgInputs.current[i] = el;
-                }}
-                type="file"
-                accept="image/*"
-                hidden
-                onChange={(e) => handleImage(i, e)}
-              />
-
-              {progress[`img-${i}`] && (
-                <div style={{ fontSize: 12, marginTop: 4 }}>{progress[`img-${i}`]}</div>
-              )}
+                className="bg-green-500 h-2 rounded-full"
+                style={{ width: `${progress}%` }}
+              ></div>
             </div>
-          ))}
+          </div>
+        )}
+        <button
+          onClick={handleUpload}
+          disabled={uploading}
+          className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg"
+        >
+          {uploading ? "Mengunggah..." : "Upload Sekarang"}
+        </button>
+      </div>
 
-          {/* Video upload */}
-          <div
-            style={{
-              border: "1px dashed #ccc",
-              borderRadius: 10,
-              padding: 6,
-              textAlign: "center",
-            }}
-          >
-            <div
-              style={{
-                height: 110,
-                display: "grid",
-                placeItems: "center",
-                overflow: "hidden",
-                borderRadius: 8,
-                background: "#f9fafb",
-              }}
-            >
-              {videoPreview ? (
-                <video
-                  src={videoPreview}
-                  controls
-                  muted
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
+      {/* Form Info Kendaraan */}
+      <div className="space-y-3">
+        <input
+          className="w-full border p-2 rounded"
+          placeholder="Judul Iklan"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+        />
+        <textarea
+          className="w-full border p-2 rounded"
+          placeholder="Deskripsi"
+          rows={3}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
+        <input
+          className="w-full border p-2 rounded"
+          placeholder="Harga"
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+        />
+        <input
+          className="w-full border p-2 rounded"
+          placeholder="Merk / Brand"
+          value={brand}
+          onChange={(e) => setBrand(e.target.value)}
+        />
+        <input
+          className="w-full border p-2 rounded"
+          placeholder="Tipe / Model"
+          value={type}
+          onChange={(e) => setType(e.target.value)}
+        />
+        <select
+          className="w-full border p-2 rounded"
+          value={year}
+          onChange={(e) => setYear(e.target.value)}
+        >
+          <option value="">Pilih Tahun</option>
+          {Array.from(
+            { length: new Date().getFullYear() - 1979 },
+            (_, i) => new Date().getFullYear() - i
+          ).map((y) => (
+            <option key={y} value={y}>
+              {y}
+            </option>
+          ))}
+        </select>
+        <input
+          className="w-full border p-2 rounded"
+          placeholder="Warna"
+          value={color}
+          onChange={(e) => setColor(e.target.value)}
+        />
+        <input
+          className="w-full border p-2 rounded"
+          placeholder="Kilometer (KM)"
+          value={mileage}
+          onChange={(e) => setMileage(e.target.value)}
+        />
+        <input
+          className="w-full border p-2 rounded"
+          placeholder="Lokasi"
+          value={location}
+          onChange={(e) => setLocation(e.target.value)}
+        />
+      </div>
+
+      {/* Tampilkan URL Media yang diunggah */}
+      {mediaUrls.length > 0 && (
+        <div className="mt-6">
+          <h2 className="font-semibold mb-2">Media Terunggah:</h2>
+          <div className="grid grid-cols-2 gap-2">
+            {mediaUrls.map((m, i) =>
+              m.type === "image" ? (
+                <img
+                  key={i}
+                  src={m.url}
+                  alt="uploaded"
+                  className="w-full h-32 object-cover rounded"
                 />
               ) : (
-                <span style={{ color: "#999" }}>Upload Video</span>
-              )}
-            </div>
-
-            <div style={{ marginTop: 8, display: "flex", gap: 8, justifyContent: "center" }}>
-              <button type="button" onClick={() => videoInput.current?.click()}>
-                Pilih
-              </button>
-              <button
-                type="button"
-                onClick={() => setVideoPreview(null)}
-              >
-                Hapus
-              </button>
-            </div>
-
-            <input
-              ref={(el) => {
-                videoInput.current = el;
-              }}
-              type="file"
-              accept="video/*"
-              hidden
-              onChange={handleVideo}
-            />
-
-            {progress.video && <div style={{ fontSize: 12, marginTop: 4 }}>{progress.video}</div>}
+                <video
+                  key={i}
+                  src={m.url}
+                  controls
+                  className="w-full h-32 rounded"
+                />
+              )
+            )}
           </div>
         </div>
-      </section>
-
-      {/* Form Section */}
-      <form onSubmit={onSubmit} style={{ marginTop: 24, display: "grid", gap: 12 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <div>
-            <label>Judul</label>
-            <input value={form.title} onChange={onChange("title")} placeholder="Contoh: NMAX 2019" />
-          </div>
-          <div>
-            <label>Harga (Rp)</label>
-            <input value={form.price} onChange={onChange("price")} inputMode="numeric" />
-          </div>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-          <div>
-            <label>Merk</label>
-            <input value={form.brand} onChange={onChange("brand")} placeholder="Honda" />
-          </div>
-          <div>
-            <label>Tipe</label>
-            <input value={form.unit_type} onChange={onChange("unit_type")} placeholder="Vario" />
-          </div>
-          <div>
-            <label>Tahun</label>
-            <select value={form.year} onChange={onChange("year")}>
-              {Array.from({ length: new Date().getFullYear() - 1980 + 1 }).map((_, idx) => {
-                const y = 1980 + idx;
-                return (
-                  <option key={y} value={y}>
-                    {y}
-                  </option>
-                );
-              })}
-            </select>
-          </div>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <div>
-            <label>Warna</label>
-            <input value={form.color} onChange={onChange("color")} placeholder="Hitam" />
-          </div>
-          <div>
-            <label>Kilometer</label>
-            <input value={form.mileage_km} onChange={onChange("mileage_km")} inputMode="numeric" />
-          </div>
-        </div>
-
-        <div>
-          <label>Deskripsi</label>
-          <textarea value={form.description} onChange={onChange("description")} rows={5} />
-        </div>
-
-        <button type="submit" style={{ padding: "8px 12px" }}>
-          Simpan Listing
-        </button>
-      </form>
-    </main>
+      )}
+    </div>
   );
 }
