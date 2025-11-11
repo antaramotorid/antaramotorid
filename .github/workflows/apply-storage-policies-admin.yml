@@ -1,0 +1,25 @@
+name: Apply Supabase Storage Policies (Admin API)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  apply-policies:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        run: npm install node-fetch@2
+
+      - name: Run apply_storage_policies_admin.js
+        run: node scripts/apply_storage_policies_admin.js
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SERVICE_ROLE_KEY: ${{ secrets.SERVICE_ROLE_KEY }}
