@@ -1,5 +1,5 @@
 // app/layout.tsx
-import "./globals.css";
+import "../styles/globals.css";
 import React from "react";
 
 export const metadata = {
