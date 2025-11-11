@@ -22,7 +22,7 @@ export default function SellPage() {
   const [uploading, setUploading] = useState(false);
   const [mediaUrls, setMediaUrls] = useState<MediaItem[]>([]);
 
-  // ========== Upload Media ke Supabase ==========
+  // ================== UPLOAD MEDIA ==================
   async function uploadMedia(file: File, type: "image" | "video") {
     const bucket = type === "image" ? "listing-images" : "listing-videos";
     const fileExt = file.name.split(".").pop();
@@ -41,18 +41,26 @@ export default function SellPage() {
     return data.publicUrl;
   }
 
-  async function handleUploadAll() {
+  // ================== UPLOAD DAN SIMPAN DATA ==================
+  async function handleUploadAndSave() {
     try {
+      if (!title || !price) {
+        alert("Judul dan harga wajib diisi");
+        return;
+      }
       if (images.length === 0 && !video) {
         alert("Upload minimal 1 foto atau video");
         return;
       }
+
       setUploading(true);
       setProgress(0);
+
       const total = images.length + (video ? 1 : 0);
       let done = 0;
       const uploaded: MediaItem[] = [];
 
+      // Upload foto
       for (const img of images) {
         const url = await uploadMedia(img, "image");
         uploaded.push({ type: "image", url });
@@ -60,6 +68,7 @@ export default function SellPage() {
         setProgress(Math.round((done / total) * 100));
       }
 
+      // Upload video
       if (video) {
         const url = await uploadMedia(video, "video");
         uploaded.push({ type: "video", url });
@@ -68,35 +77,52 @@ export default function SellPage() {
       }
 
       setMediaUrls(uploaded);
-      alert("✅ Semua media berhasil diunggah!");
+
+      // Simpan metadata listing
+      const { data: listingData, error: listingError } = await supabase
+        .from("listings")
+        .insert([
+          {
+            title,
+            brand,
+            type,
+            year: year ? Number(year) : null,
+            color,
+            mileage: mileage ? Number(mileage) : null,
+            price: price ? Number(price) : null,
+            description,
+            location,
+          },
+        ])
+        .select()
+        .single();
+
+      if (listingError) throw listingError;
+      const listingId = listingData.id;
+
+      // Simpan semua media
+      const mediaInsert = uploaded.map((m) => ({
+        listing_id: listingId,
+        type: m.type,
+        url: m.url,
+      }));
+
+      const { error: mediaError } = await supabase
+        .from("media")
+        .insert(mediaInsert);
+
+      if (mediaError) throw mediaError;
+
+      alert("✅ Iklan berhasil disimpan ke database!");
+      setUploading(false);
     } catch (error: any) {
-      alert("❌ Upload gagal: " + error.message);
       console.error(error);
-    } finally {
+      alert("❌ Gagal menyimpan iklan: " + error.message);
       setUploading(false);
     }
   }
 
-  // ========== Submit Form ==========
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const payload = {
-      title,
-      brand,
-      type,
-      year,
-      color,
-      mileage,
-      price,
-      description,
-      location,
-      media: mediaUrls,
-    };
-    console.log("Kirim data iklan:", payload);
-    alert("Data iklan siap dikirim (cek console).");
-  }
-
-  // ========== Render ==========
+  // ================== RENDER ==================
   return (
     <div className="max-w-3xl mx-auto p-4">
       <h1 className="text-2xl font-bold mb-4 text-gray-800">
@@ -139,19 +165,16 @@ export default function SellPage() {
           </div>
         )}
         <button
-          onClick={handleUploadAll}
+          onClick={handleUploadAndSave}
           disabled={uploading}
           className="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
         >
-          {uploading ? "Mengunggah..." : "Upload Sekarang"}
+          {uploading ? "Mengunggah..." : "Upload & Simpan Iklan"}
         </button>
       </div>
 
       {/* Form Info Kendaraan */}
-      <form
-        onSubmit={handleSubmit}
-        className="bg-white border rounded-xl p-4 shadow-sm space-y-3"
-      >
+      <div className="bg-white border rounded-xl p-4 shadow-sm space-y-3">
         <input
           className="w-full border p-2 rounded"
           placeholder="Judul Iklan"
@@ -216,14 +239,7 @@ export default function SellPage() {
           value={description}
           onChange={(e) => setDescription(e.target.value)}
         />
-
-        <button
-          type="submit"
-          className="w-full bg-green-600 text-white py-2 rounded-lg hover:bg-green-700"
-        >
-          Simpan Iklan
-        </button>
-      </form>
+      </div>
 
       {/* Preview Media */}
       {mediaUrls.length > 0 && (
