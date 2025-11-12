@@ -1,11 +1,105 @@
+/* app/globals.css
+   Tailwind base + minimal OLX-like global styles
+*/
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-html, body, #__next {
-  height: 100%;
+/* Global resets / typography */
+:root{
+  --olx-blue:#0077ff;
+  --olx-muted:#6b7280;
+  --container-max:1200px;
 }
+
+html,body,#__next {
+  height:100%;
+}
+
 body {
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+               Roboto, "Helvetica Neue", Arial;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+  color:#111827;
+  background-color:#ffffff;
+  line-height:1.4;
+  margin:0;
+}
+
+/* container wrapper similar to OLX center column */
+.container {
+  max-width: var(--container-max);
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+/* Listing upload layout helpers */
+.upload-grid {
+  display:grid;
+  grid-template-columns: 360px 1fr;
+  gap: 1.25rem;
+  align-items:start;
+}
+
+/* image placeholders */
+.img-slot {
+  width:100%;
+  height: 220px;
+  border: 1px dashed #d1d5db;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color: #9ca3af;
+  background: #fbfbfb;
+  border-radius: 6px;
+}
+
+/* media preview row for thumbnails */
+.media-row {
+  display:flex;
+  gap: .75rem;
+  align-items:center;
+}
+
+/* form row (label + control) */
+.form-row {
+  display:flex;
+  gap: 1rem;
+  align-items:center;
+  margin-bottom: .75rem;
+}
+
+/* label styles */
+.form-label {
+  min-width: 110px;
+  color: var(--olx-muted);
+  font-size: .95rem;
+}
+
+/* inputs */
+.input, .select, .textarea {
+  width:100%;
+  padding:.5rem .75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  font-size: .95rem;
+}
+
+.select { appearance: none; }
+
+/* small helpers */
+.hint {
+  color:#6b7280;
+  font-size:.85rem;
+}
+
+/* responsive */
+@media (max-width: 900px) {
+  .upload-grid { grid-template-columns: 1fr; }
+  .img-slot { height: 180px; }
 }
