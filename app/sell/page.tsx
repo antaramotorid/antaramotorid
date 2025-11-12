@@ -4,20 +4,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 /**
  * This file expects a JSON file at /data/olx-attributes.json (relative to repo root)
- * with the schema described in the assistant message. Example:
- *
- * {
- *   "brands": { "Honda": ["Vario","Beat"], "Yamaha": ["NMAX","R15"] },
- *   "years": ["2025","2024", "..."],
- *   "colors": ["Hitam","Putih", "..."],
- *   "kilometers": ["< 1.000 km", "1.000 - 5.000 km", "..."],
- *   "locations": { "Provinsi": { "Kota": ["Kecamatan1","Kecamatan2"] } }
- * }
- *
- * If your JSON lives elsewhere, adjust the import path below.
+ * with the schema described previously.
  */
-
-// import JSON from repo (this assumes you committed the file to repo path /data/olx-attributes.json)
 import olxAttributes from "../../data/olx-attributes.json";
 
 export type MediaItem = { type: "image" | "video"; url: string };
@@ -27,7 +15,7 @@ type OlxAttributesShape = {
   years?: string[];
   colors?: string[];
   kilometers?: string[];
-  locations?: Record<string, Record<string, string[]>>; // prov -> city -> [districts]
+  locations?: Record<string, Record<string, string[]>>;
 };
 
 const ATTRS: OlxAttributesShape = (olxAttributes as OlxAttributesShape) ?? {};
@@ -86,7 +74,6 @@ export default function SellPage(): JSX.Element {
 
   // ---- helpers for previews ----
   useEffect(() => {
-    // revoke object URLs when component unmounts
     return () => {
       imagePreviews.forEach((p) => p && URL.revokeObjectURL(p));
       if (videoPreview) URL.revokeObjectURL(videoPreview);
@@ -114,15 +101,12 @@ export default function SellPage(): JSX.Element {
       const url = URL.createObjectURL(file);
       setImagePreviews((prev) => {
         const copy = [...prev];
-        // revoke previous if exists
         if (copy[slot]) URL.revokeObjectURL(copy[slot] as string);
         copy[slot] = url;
         return copy;
       });
-      // reset progress
       setImageProgress((prev) => prev.map((p, idx) => (idx === slot ? 0 : p)));
     } else {
-      // cleared
       setImagePreviews((prev) => {
         const copy = [...prev];
         if (copy[slot]) URL.revokeObjectURL(copy[slot] as string);
@@ -161,7 +145,7 @@ export default function SellPage(): JSX.Element {
     handleVideoChange(null);
   }
 
-  // Simulated upload progress helper (for client preview)
+  // Simulated upload progress helper
   async function simulateProgressForSlot(slot: number) {
     let p = 0;
     return new Promise<void>((res) => {
@@ -194,11 +178,10 @@ export default function SellPage(): JSX.Element {
     });
   }
 
-  // ---- main: upload simulation then build payload to send to server (you will replace upload with Supabase calls) ----
+  // ---- main: upload simulation then build payload to send to server ----
   const [uploadingAll, setUploadingAll] = useState(false);
 
   async function handleUploadAndSave() {
-    // Minimal validation similar to OLX: title, price, at least one image
     if (!title.trim()) {
       alert("Masukkan judul iklan.");
       return;
@@ -214,13 +197,8 @@ export default function SellPage(): JSX.Element {
 
     setUploadingAll(true);
 
-    // simulate uploads (images sequentially)
     for (let i = 0; i < imageFiles.length; i++) {
       if (imageFiles[i]) {
-        // simulate per-slot upload progress
-        // in real integration: call supabase.storage.from(bucket).upload(...)
-        // then obtain public url and store into payload media list
-        // here we just run fake progress
         // eslint-disable-next-line no-await-in-loop
         await simulateProgressForSlot(i);
       }
@@ -230,7 +208,6 @@ export default function SellPage(): JSX.Element {
       await simulateProgressForVideo();
     }
 
-    // Build media array in order images -> video if present (this mirrors prior spec)
     const media: MediaItem[] = [];
     for (let i = 0; i < imagePreviews.length; i++) {
       const p = imagePreviews[i];
@@ -238,7 +215,6 @@ export default function SellPage(): JSX.Element {
     }
     if (videoPreview) media.push({ type: "video", url: videoPreview });
 
-    // Build listing payload (client-side). Replace with actual DB/API insert in production.
     const payload = {
       title,
       price: Number(String(price).replace(/[^\d.-]/g, "")) || null,
@@ -253,18 +229,14 @@ export default function SellPage(): JSX.Element {
       createdAt: new Date().toISOString(),
     };
 
-    // Log and inform user; in prod call API to persist
     // eslint-disable-next-line no-console
     console.log("Listing payload (demo):", payload);
     alert("Iklan berhasil (simulasi). Periksa console untuk payload.");
 
     setUploadingAll(false);
-
-    // optional: reset form on success
-    // (keep this behavior configurable)
   }
 
-  // ---- small UI helpers for selecting file via hidden inputs ----
+  // ---- UI helpers ----
   function triggerImageInput(slot: number) {
     imageInputRefs.current[slot]?.click();
   }
@@ -328,7 +300,7 @@ export default function SellPage(): JSX.Element {
                       <input
                         type="file"
                         accept="image/*"
-                        ref={(el) => (imageInputRefs.current[idx] = el)}
+                        ref={(el) => { imageInputRefs.current[idx] = el; }}
                         className="hidden"
                         onChange={async (e) => {
                           const file = e.target.files?.[0] ?? null;
@@ -358,7 +330,7 @@ export default function SellPage(): JSX.Element {
                   <input
                     type="file"
                     accept="video/*"
-                    ref={videoInputRef}
+                    ref={(el) => { videoInputRef.current = el; }}
                     className="hidden"
                     onChange={async (e) => {
                       const file = e.target.files?.[0] ?? null;
