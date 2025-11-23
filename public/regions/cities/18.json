@@ -1,0 +1,18 @@
+[
+  { "id": 1801, "name": "Lampung Barat" },
+  { "id": 1802, "name": "Tanggamus" },
+  { "id": 1803, "name": "Lampung Selatan" },
+  { "id": 1804, "name": "Lampung Timur" },
+  { "id": 1805, "name": "Lampung Tengah" },
+  { "id": 1806, "name": "Lampung Utara" },
+  { "id": 1807, "name": "Way Kanan" },
+  { "id": 1808, "name": "Tulang Bawang" },
+  { "id": 1809, "name": "Pesawaran" },
+  { "id": 1810, "name": "Pringsewu" },
+  { "id": 1811, "name": "Mesuji" },
+  { "id": 1812, "name": "Tulang Bawang Barat" },
+  { "id": 1813, "name": "Pesisir Barat" },
+
+  { "id": 1871, "name": "Bandar Lampung" },
+  { "id": 1872, "name": "Metro" }
+]
