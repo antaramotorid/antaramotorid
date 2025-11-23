@@ -1,0 +1,24 @@
+[
+  { "id": 1101, "name": "Aceh Selatan" },
+  { "id": 1102, "name": "Aceh Tenggara" },
+  { "id": 1103, "name": "Aceh Timur" },
+  { "id": 1104, "name": "Aceh Tengah" },
+  { "id": 1105, "name": "Aceh Barat" },
+  { "id": 1106, "name": "Aceh Besar" },
+  { "id": 1107, "name": "Pidie" },
+  { "id": 1108, "name": "Bireuen" },
+  { "id": 1109, "name": "Aceh Utara" },
+  { "id": 1110, "name": "Aceh Barat Daya" },
+  { "id": 1111, "name": "Gayo Lues" },
+  { "id": 1112, "name": "Aceh Tamiang" },
+  { "id": 1113, "name": "Nagan Raya" },
+  { "id": 1114, "name": "Aceh Jaya" },
+  { "id": 1115, "name": "Bener Meriah" },
+  { "id": 1116, "name": "Pidie Jaya" },
+
+  { "id": 1171, "name": "Banda Aceh" },
+  { "id": 1172, "name": "Sabang" },
+  { "id": 1173, "name": "Langsa" },
+  { "id": 1174, "name": "Lhokseumawe" },
+  { "id": 1175, "name": "Subulussalam" }
+]
