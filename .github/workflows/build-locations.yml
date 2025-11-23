@@ -1,0 +1,37 @@
+name: Build Indonesia Locations (OLX Nested)
+
+on:
+  workflow_dispatch: {}   # biar muncul tombol "Run workflow" di Actions
+  schedule:
+    - cron: "0 3 * * 1"   # auto refresh tiap Senin jam 03:00 UTC (optional)
+
+jobs:
+  build-locations:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install minimal deps
+        run: |
+          node -v
+
+      - name: Generate locations.json (nested OLX)
+        run: |
+          node scripts/build-locations-olx-nested.mjs
+
+      - name: Commit locations.json
+        run: |
+          git config user.name "antaramotorid-bot"
+          git config user.email "bot@antaramotorid.local"
+          git add public/locations.json
+          git commit -m "chore: update public/locations.json (Kemendagri nested)" || echo "No changes"
+          git push
