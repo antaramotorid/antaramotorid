@@ -1,0 +1,22 @@
+[
+  { "id": 1301, "name": "Kepulauan Mentawai" },
+  { "id": 1302, "name": "Pesisir Selatan" },
+  { "id": 1303, "name": "Solok" },
+  { "id": 1304, "name": "Sijunjung" },
+  { "id": 1305, "name": "Tanah Datar" },
+  { "id": 1306, "name": "Padang Pariaman" },
+  { "id": 1307, "name": "Agam" },
+  { "id": 1308, "name": "Lima Puluh Kota" },
+  { "id": 1309, "name": "Pasaman" },
+  { "id": 1310, "name": "Solok Selatan" },
+  { "id": 1311, "name": "Dharmasraya" },
+  { "id": 1312, "name": "Pasaman Barat" },
+
+  { "id": 1371, "name": "Padang" },
+  { "id": 1372, "name": "Solok" },
+  { "id": 1373, "name": "Sawahlunto" },
+  { "id": 1374, "name": "Padang Panjang" },
+  { "id": 1375, "name": "Bukittinggi" },
+  { "id": 1376, "name": "Payakumbuh" },
+  { "id": 1377, "name": "Pariaman" }
+]
