@@ -1,0 +1,14 @@
+[
+  { "id": 1501, "name": "Kerinci" },
+  { "id": 1502, "name": "Merangin" },
+  { "id": 1503, "name": "Sarolangun" },
+  { "id": 1504, "name": "Batanghari" },
+  { "id": 1505, "name": "Muaro Jambi" },
+  { "id": 1506, "name": "Tanjung Jabung Timur" },
+  { "id": 1507, "name": "Tanjung Jabung Barat" },
+  { "id": 1508, "name": "Tebo" },
+  { "id": 1509, "name": "Bungo" },
+
+  { "id": 1571, "name": "Jambi" },
+  { "id": 1572, "name": "Sungai Penuh" }
+]
