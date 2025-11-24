@@ -1,0 +1,19 @@
+[
+  { "id": 7401, "name": "Buton" },
+  { "id": 7402, "name": "Muna" },
+  { "id": 7403, "name": "Konawe" },
+  { "id": 7404, "name": "Kolaka" },
+  { "id": 7405, "name": "Konawe Selatan" },
+  { "id": 7406, "name": "Bombana" },
+  { "id": 7407, "name": "Wakatobi" },
+  { "id": 7408, "name": "Kolaka Utara" },
+  { "id": 7409, "name": "Buton Utara" },
+  { "id": 7410, "name": "Konawe Utara" },
+  { "id": 7411, "name": "Konawe Kepulauan" },
+  { "id": 7412, "name": "Muna Barat" },
+  { "id": 7413, "name": "Buton Tengah" },
+  { "id": 7414, "name": "Buton Selatan" },
+
+  { "id": 7471, "name": "Kendari" },
+  { "id": 7472, "name": "Baubau" }
+]
