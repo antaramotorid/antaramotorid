@@ -1,0 +1,18 @@
+[
+  { "id": 7101, "name": "Bolaang Mongondow" },
+  { "id": 7102, "name": "Minahasa" },
+  { "id": 7103, "name": "Kepulauan Sangihe" },
+  { "id": 7104, "name": "Kepulauan Talaud" },
+  { "id": 7105, "name": "Minahasa Selatan" },
+  { "id": 7106, "name": "Minahasa Utara" },
+  { "id": 7107, "name": "Bolaang Mongondow Utara" },
+  { "id": 7108, "name": "Siau Tagulandang Biaro" },
+  { "id": 7109, "name": "Minahasa Tenggara" },
+  { "id": 7110, "name": "Bolaang Mongondow Selatan" },
+  { "id": 7111, "name": "Bolaang Mongondow Timur" },
+
+  { "id": 7171, "name": "Manado" },
+  { "id": 7172, "name": "Bitung" },
+  { "id": 7173, "name": "Tomohon" },
+  { "id": 7174, "name": "Kotamobagu" }
+]
