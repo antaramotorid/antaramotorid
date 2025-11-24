@@ -1,0 +1,14 @@
+[
+  { "id": 6401, "name": "Paser" },
+  { "id": 6402, "name": "Kutai Barat" },
+  { "id": 6403, "name": "Kutai Kartanegara" },
+  { "id": 6404, "name": "Kutai Timur" },
+  { "id": 6405, "name": "Berau" },
+
+  { "id": 6471, "name": "Balikpapan" },
+  { "id": 6472, "name": "Samarinda" },
+  { "id": 6473, "name": "Bontang" },
+
+  { "id": 6411, "name": "Penajam Paser Utara" },
+  { "id": 6412, "name": "Mahakam Ulu" }
+]
